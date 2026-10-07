@@ -100,7 +100,7 @@ Single binary crate, no async. One file per concern in `src/`:
   and round again. A game under way takes the new level only if it is easier or
   nothing has happened yet (no guess, no hint): earlier guesses were not held to
   stricter rules, and hints may have been used.
-- **Sound** (`sound.rs`, since the change after 0.1.0). A `Cue` is a list of notes
+- **Sound** (`sound.rs`, since 0.1.1). A `Cue` is a list of notes
   (start, frequency, length); `Cue::samples` mixes them into 16-bit mono at 22050 Hz,
   each note with a quick rise and a bell-like decay, and `wav` wraps that as a file.
   Both are pure and unit-tested. `Sound::play` writes the file into a directory of
@@ -184,15 +184,16 @@ dialog lines of at most 35 characters, tests beside the code.
 - **The core is shared as wordl's library** (asked for by the user: "is there a way to
   sync the shared core"). See wordl's `CLAUDE.md`, "A library and a game", for what
   was considered instead.
-- **The game starts on Normal; Easy is a level to choose** (the user, after trying
-  0.1.0: "Start the game on normal difficulty"). 0.1.0 started on Easy, because the
+- **The game starts on Normal; Easy is a level to choose** (since 0.1.1; the user,
+  after trying 0.1.0: "Start the game on normal difficulty"). 0.1.0 started on Easy, because the
   first request was for rules "easier by default, but have the option for more
   difficult levels". Only what an absent `level` means changed: a player who chose a
   level, Easy included, keeps it. What Easy means was proposed by Claude and accepted
   as part of "go ahead": eight guesses, hints, and no penalty for a word not solved.
   The numbers (eight, four hints, three stars) are Claude's choices and have not been
   played by a child yet.
-- **Sounds, with a way to turn them off** (asked for by the user after trying 0.1.0).
+- **Sounds, with a way to turn them off** (asked for by the user after trying 0.1.0;
+  since 0.1.1).
   They are played by the system's own audio player, not by an audio library: a
   library (rodio, cpal) links ALSA on Linux, which the static musl release binaries
   cannot do, and would be the project's first dependency with system requirements.
