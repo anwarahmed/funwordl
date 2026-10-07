@@ -2,6 +2,7 @@ mod app;
 mod font;
 mod layout;
 mod level;
+mod sound;
 mod theme;
 mod ui;
 
@@ -46,21 +47,23 @@ Options:
   -d, --daily               start with today's puzzle
   -t, --theme NAME          candy, sky, paper, daylight, midnight, neon, contrast, ocean,
                             ember or terminal
-      --easy                eight guesses, and hints with Tab (default)
-      --normal              six guesses; any dictionary word is a valid guess
+      --easy                eight guesses, and hints with Tab
+      --normal              six guesses; any dictionary word is a valid guess (default)
       --hard                green letters stay fixed, yellow letters must be reused
       --ultra               ultra hard: also, yellow letters must move to another
                             spot and gray letters may not be played again
       --no-animation        skip the tile animations and the confetti
+      --no-sound            play without sound this time
 
 In the game: type letters, Enter to guess, Backspace to delete.
   ?  help        Tab hint         ^N new word        ^D daily puzzle
   ^S stars       ^W my words      ^T theme           ^X level
-  ^G show the word                ^Q quit
+  ^G show the word                ^A sound on/off    ^Q quit
 The on-screen keyboard and the buttons can be clicked with the mouse.
 
 Environment:
   FUNWORDL_NO_UPDATE        set to skip the update check for one run
+  FUNWORDL_NO_SOUND         set to play without sound for one run
 
 Stars and words are kept in $XDG_STATE_HOME/funwordl (~/.local/state/funwordl).
 ";
@@ -78,6 +81,8 @@ fn main() -> ExitCode {
         theme: None,
         level: None,
         animate: std::env::var_os("FUNWORDL_NO_ANIM").is_none_or(|v| v.is_empty()),
+        // On unless switched off in the game (Ctrl-A), which is remembered.
+        sound: std::env::var_os("FUNWORDL_NO_SOUND").is_none_or(|v| v.is_empty()) && stats.text("sound") != Some("0"),
         truecolor: matches!(std::env::var("COLORTERM").as_deref(), Ok("truecolor" | "24bit")),
         debug_answer: std::env::var("FUNWORDL_DEBUG_ANSWER").ok().and_then(|w| game::word(&w)),
     };
@@ -121,6 +126,7 @@ fn main() -> ExitCode {
             "--hard" => options.level = Some(Level::Hard),
             "--ultra" => options.level = Some(Level::Ultra),
             "--no-animation" => options.animate = false,
+            "--no-sound" => options.sound = false,
             other => return fail(&format!("unknown option '{other}' (try --help)")),
         }
     }

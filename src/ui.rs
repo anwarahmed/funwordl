@@ -496,11 +496,11 @@ fn dialog(app: &App) -> Option<Dialog> {
     Some(match app.modal {
         Modal::None => return None,
         Modal::Help => {
+            // Twenty lines: with its frame and buttons that is all of a 24-row terminal.
             let mut lines = vec![middle("HOW TO PLAY", accent), blank()];
             for s in ["Guess the hidden 5-letter word.", "The tiles show how close you are:"] {
                 lines.push(line(vec![(s.to_string(), text)]));
             }
-            lines.push(blank());
             for (mark, meaning) in
                 [(Mark::Green, "right letter, right spot"), (Mark::Yellow, "right letter, wrong spot"), (Mark::Gray, "letter is not in the word")]
             {
@@ -514,7 +514,8 @@ fn dialog(app: &App) -> Option<Dialog> {
                 ("^N", "new word", "^D", "daily puzzle"),
                 ("^S", "stars", "^W", "my words"),
                 ("^T", "theme", "^X", "level"),
-                ("^G", "show the word", "^Q", "quit"),
+                ("^G", "show the word", "^A", "sound on/off"),
+                ("^Q", "quit", "", ""),
             ] {
                 let pad = " ".repeat((17 - width(k1) - width(d1)).max(0) as usize);
                 lines.push(line(vec![(k1.to_string(), accent), (format!(" {d1}{pad}"), text), (k2.to_string(), accent), (format!(" {d2}"), text)]));
@@ -775,7 +776,8 @@ mod tests {
     fn app_at(name: &str, level: Level) -> (App, std::path::PathBuf) {
         let dir = std::env::temp_dir().join(format!("funwordl-test-{}-ui-{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        let options = Options { mode: Mode::Practice, theme: None, level: Some(level), animate: true, truecolor: true, debug_answer: game::word("CRANE") };
+        let options =
+            Options { mode: Mode::Practice, theme: None, level: Some(level), animate: true, sound: false, truecolor: true, debug_answer: game::word("CRANE") };
         (App::new(Stats::load(dir.clone()), options), dir)
     }
 

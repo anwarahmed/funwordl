@@ -9,7 +9,8 @@
 #   3. the game itself in a detached tmux session (skipped when tmux is missing)
 #
 # Nothing here touches the user's own tmux server: the session lives on a socket of its
-# own, and that is the only one ever killed.
+# own, and that is the only one ever killed. Nothing makes a noise either: every start
+# of the game has FUNWORDL_NO_SOUND set.
 #
 # The rules, the layout and the drawing are covered by `cargo test`; this is for what
 # only shows when the real program meets a real terminal.
@@ -43,6 +44,7 @@ has "--version" "funwordl $VERSION (" "$("$BIN" --version)"
 has "--help" "funwordl update" "$("$BIN" --help)"
 has "--licenses names SCOWL" "Kevin Atkinson" "$("$BIN" --licenses)"
 has "an unknown option is refused" "unknown option" "$("$BIN" --nonsense 2>&1)"
+has "--help names the sound switch" "--no-sound" "$("$BIN" --help)"
 has "an unknown theme is refused" "unknown theme" "$("$BIN" --theme plaid 2>&1)"
 has "needs a terminal" "needs an interactive terminal" "$("$BIN" </dev/null 2>&1)"
 has "a checkout never updates itself" "running from a source checkout" "$("$BIN" update 2>&1)"
@@ -159,10 +161,10 @@ else
         state=$1
         shift
         tmux -L "$SOCK" new-session -d -x 80 -y 24 \
-            "env XDG_STATE_HOME='$state' FUNWORDL_NO_UPDATE=1 FUNWORDL_DEBUG_ANSWER=crane $*; echo \"EXIT=\$?\"; sleep 20"
+            "env XDG_STATE_HOME='$state' FUNWORDL_NO_UPDATE=1 FUNWORDL_NO_SOUND=1 FUNWORDL_DEBUG_ANSWER=crane $*; echo \"EXIT=\$?\"; sleep 20"
     }
 
-    start "$TMP/xdg" FUNWORDL_NO_ANIM=1 "'$BIN'"
+    start "$TMP/xdg" FUNWORDL_NO_ANIM=1 "'$BIN'" --easy
     expect "game: starts" "F   U   N   W   O   R   D   L"
     keys '?'
     expect "game: help opens" "HOW TO PLAY"
@@ -236,11 +238,12 @@ else
     # With animations on: a guess is revealed, and keys typed meanwhile are kept.
     start "$TMP/xdg3" "'$BIN'"
     expect "animation: game starts" "F   U   N   W   O   R   D   L"
+    expect "a new player starts on Normal" "^X Normal"
     keys -l slate
     keys Enter
     keys -l crane
     keys Enter
-    expect "animation: keys typed during a reveal are not lost" "Solved in 2/8"
+    expect "animation: keys typed during a reveal are not lost" "Solved in 2/6"
     expect "animation: the stars open once the confetti has landed" "YOU DID IT!"
     keys C-q
     expect "animation: quits cleanly" "EXIT=0"
@@ -252,7 +255,7 @@ else
         launch() { # <release directory>
             tmux -L "$SOCK" kill-server 2>/dev/null
             tmux -L "$SOCK" new-session -d -x 80 -y 24 \
-                "env XDG_STATE_HOME='$TMP/ustate' FUNWORDL_RELEASE_URL='file://$1' FUNWORDL_NO_ANIM=1 '$INST'; echo \"EXIT=\$?\"; sleep 20"
+                "env XDG_STATE_HOME='$TMP/ustate' FUNWORDL_RELEASE_URL='file://$1' FUNWORDL_NO_ANIM=1 FUNWORDL_NO_SOUND=1 '$INST'; echo \"EXIT=\$?\"; sleep 20"
         }
         fresh_copy
         rm -f "$STAMP"
