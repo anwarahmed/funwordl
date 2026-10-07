@@ -2,19 +2,20 @@
 
 A playful Wordle-style word game for the terminal, made for children. Guess the hidden
 five-letter word, with sounds and confetti; collect stars and the words you have
-learned; switch to Easy for more guesses and hints.
+learned; ask for a hint when you are stuck.
 
 ![funwordl in a large terminal: a solved word, confetti falling, the title in eight colors](assets/screenshot.png)
 
-- **An Easy level.** Eight guesses, hints, and a word that is not solved costs
-  nothing. It is one key away from Normal, where the game starts.
-- **Hints that teach.** On Easy, the first hint is what the word means. After that, a
-  letter at a time.
+- **Hints that teach.** The first hint is what the word means. After that, a letter
+  at a time.
+- **An Easy level.** Eight guesses, and a word that is not solved costs nothing. It
+  is one key away from Normal, where the game starts; two harder levels are beyond.
 - **Sounds.** A note for every tile as a guess is turned over, higher the closer it
   is, and a little tune for a solved word. One key switches them off.
 - **Stars and a collection.** A solved word earns up to three stars. Every word you
   meet is kept, with its meaning, to leaf through later.
-- **Confetti**, a bright theme to start with, and nine more to choose from.
+- **Confetti**, and twenty-one color themes: fifteen bright ones, from pink through
+  red, orange, yellow, green and purple to blue, and five dark ones.
 - **Fills the terminal and follows its size.** Big pixel-art tiles on a large
   terminal, single characters on a small one.
 - **Keyboard first, mouse welcome.** Everything has a key; the on-screen keyboard and
@@ -125,7 +126,7 @@ The on-screen keyboard keeps track of what you know about each letter.
 | `A`-`Z`     | type a letter                                  |
 | `Enter`     | guess                                          |
 | `Backspace` | delete a letter                                |
-| `Tab`       | a hint (on Easy)                               |
+| `Tab`       | a hint (on Easy and Normal)                    |
 | `?` or `F1` | help                                           |
 | `Ctrl-N`    | new game with a random word                    |
 | `Ctrl-D`    | today's daily puzzle                           |
@@ -145,10 +146,10 @@ choose.
 
 - **Easy** - eight guesses, and hints. A word you do not solve is not counted against
   you and does not end a run of solved words.
-- **Normal** (where the game starts) - six guesses, no hints. Guesses must be real
+- **Normal** (where the game starts) - six guesses, and hints. Guesses must be real
   words.
-- **Hard** - also: green letters must stay where they are and yellow letters must be
-  used again.
+- **Hard** - no hints, and green letters must stay where they are and yellow letters
+  must be used again.
 - **Ultra Hard** - also: a yellow letter must move to another spot, and a gray letter
   can't be played again (beyond the copies already shown as green or yellow).
 
@@ -158,15 +159,15 @@ been guessed or hinted yet.
 
 ### Hints
 
-On Easy, `Tab` opens the hints for the word. The first is what the word means. `Tab`
+On Easy and Normal, `Tab` opens the hints for the word. The first is what the word means. `Tab`
 again, inside the hint window, gives one of its letters, up to three; a letter you
 were given waits faintly in its spot on the board until you type over it. Opening the
 window again later shows the hints you already have and takes no new one.
 
 ### Stars
 
-A solved word earns three stars. On Easy each hint costs one, but a solved word always
-earns at least one. Your stars add up across every game, and the title line shows the total.
+A solved word earns three stars. Each hint costs one, but a solved word always earns
+at least one. Your stars add up across every game, and the title line shows the total.
 
 ### Your words
 
@@ -204,15 +205,38 @@ sitting at.
 
 ### Themes
 
-`Ctrl-T` steps through ten of them, and `--theme` starts with one:
+`Ctrl-T` steps through twenty-one of them, and `--theme` starts with one.
 
-- bright: `candy` (pink, the default), `sky` (blue), `paper` (cream) and `daylight`
-  (white);
-- dark: `midnight`, `neon`, `contrast`, `ocean` and `ember`;
-- `terminal`, which uses only your terminal's own 16 colors, so it follows your
-  terminal theme.
+Bright, each with colors chosen to go with its background:
 
-`contrast` uses orange and blue instead of green and yellow, for color-blind players.
+| Theme      | Background  | With it                  |
+| ---------- | ----------- | ------------------------ |
+| `candy`    | pink        | baby blue (the default)  |
+| `coral`    | coral red   | teal, navy and cream     |
+| `cherry`   | red         | teal and mint white      |
+| `ruby`     | deep red    | gold, with light writing |
+| `sunset`   | orange      | teal and sienna          |
+| `lemon`    | yellow      | blue-gray and brick      |
+| `mint`     | mint green  | raspberry                |
+| `meadow`   | fresh green | purple                   |
+| `sage`     | sage green  | cream and rust           |
+| `lavender` | lavender    | peach and gold           |
+| `orchid`   | orchid      | green                    |
+| `grape`    | deep purple | gold, with light writing |
+| `sky`      | blue        | orange and cream         |
+| `paper`    | cream       | terracotta and slate     |
+| `daylight` | white       | blue                     |
+
+Dark: `midnight`, `neon`, `contrast`, `ocean` and `ember`.
+
+And `terminal`, which uses only your terminal's own 16 colors, so it follows your
+terminal theme.
+
+On every theme a letter in the right spot is green and one in the wrong spot is yellow
+or orange, in shades that suit the background. A letter that is not in the word is
+gray on the dark themes and a darker shade of the background on the bright ones. The
+exception is `contrast`, which uses orange and blue instead of green and yellow, for
+color-blind players.
 
 ### Terminal size
 
@@ -235,11 +259,14 @@ funwordl --help | --version | --licenses
 
   -p, --practice            start with a new random word (default)
   -d, --daily               start with today's puzzle
-  -t, --theme NAME          candy, sky, paper, daylight, midnight, neon, contrast, ocean,
-                            ember or terminal
+  -t, --theme NAME          bright: candy, coral, cherry, ruby, sunset, lemon, mint,
+                            meadow, sage, lavender, orchid, grape, sky, paper, daylight
+                            dark: midnight, neon, contrast, ocean, ember
+                            or terminal, which follows your terminal's colors
       --easy                eight guesses, and hints with Tab
-      --normal              six guesses; any dictionary word is a valid guess (default)
-      --hard                green letters stay fixed, yellow letters must be reused
+      --normal              six guesses, and hints with Tab (default)
+      --hard                no hints; green letters stay fixed, yellow letters must
+                            be reused
       --ultra               ultra hard: also, yellow letters must move to another
                             spot and gray letters may not be played again
       --no-animation        skip the tile animations and the confetti

@@ -484,7 +484,14 @@ fn dialog(app: &App) -> Option<Dialog> {
     let text = on(th.fg.fg, panel);
     let dim = on(th.dim.fg, panel);
     let accent = on(th.accent.fg, panel).bold();
-    let gold = on(th.y.fg, panel).bold();
+    // Stars and the word are written in the yellow, and "Solved" in the green, where
+    // those can be read on the dialog; a pale yellow on a pale dialog cannot, and the
+    // accent or the text color stands in.
+    let readable = |paint: Paint, instead: Paint| {
+        if paint.rgb.is_none() || theme::brightness(paint).abs_diff(theme::brightness(th.panel)) >= 70 { paint } else { instead }
+    };
+    let gold = on(readable(th.y, th.accent).fg, panel).bold();
+    let green = on(readable(th.g, th.fg).fg, panel).bold();
     let line = |spans: Vec<(String, Style)>| DialogLine { spans, center: false };
     let middle = |s: &str, style: Style| DialogLine { spans: vec![(s.to_string(), style)], center: true };
     let centered = |spans: Vec<(String, Style)>| DialogLine { spans, center: true };
@@ -521,7 +528,9 @@ fn dialog(app: &App) -> Option<Dialog> {
                 lines.push(line(vec![(k1.to_string(), accent), (format!(" {d1}{pad}"), text), (k2.to_string(), accent), (format!(" {d2}"), text)]));
             }
             lines.push(blank());
-            for (level, rule) in [("Easy", "8 guesses, and hints"), ("Normal", "6 guesses"), ("Hard", "reuse green and yellow"), ("Ultra", "obey every clue")] {
+            for (level, rule) in
+                [("Easy", "8 guesses, hints"), ("Normal", "6 guesses, hints"), ("Hard", "reuse green and yellow"), ("Ultra", "obey every clue")]
+            {
                 lines.push(line(vec![(format!("{level:<8}"), text.bold()), (rule.to_string(), dim)]));
             }
             Dialog { lines, buttons: vec![("Esc Close", Action::Close)] }
@@ -539,7 +548,7 @@ fn dialog(app: &App) -> Option<Dialog> {
             match game.status {
                 Status::Won => {
                     let mut spans = star_spans(app.stars(), gold, dim);
-                    spans.push((format!("  Solved in {}/{}", game.guesses.len(), game.tries), on(th.g.fg, panel).bold()));
+                    spans.push((format!("  Solved in {}/{}", game.guesses.len(), game.tries), green));
                     lines.push(centered(spans));
                     // "CRANE: a tall bird..." with the word picked out on the first line.
                     for (i, row) in wrap(&format!("{answer}: {meaning}"), DIALOG_WIDTH as usize).into_iter().enumerate() {
@@ -558,15 +567,17 @@ fn dialog(app: &App) -> Option<Dialog> {
                 }
                 Status::Playing => {}
             }
-            lines.push(middle(&format!("{:>7} {:>8} {:>6} {:>6}", "Solved", "In a row", "Best", "Stars"), dim));
-            let row = format!(
-                "{:>7} {:>8} {:>6} {:>6}",
-                app.stats.of(mode, "wins"),
-                app.stats.of(mode, "streak"),
-                app.stats.of(mode, "best"),
-                app.stats.num("stars")
-            );
-            lines.extend([middle(&row, text.bold()), blank(), middle(&format!("Words in your collection: {}", app.learned.len()), dim)]);
+            // One number to a line, each with its name in front: four numbers under four
+            // headings in a row could not be told apart.
+            for (name, number) in [
+                ("Words solved", app.stats.of(mode, "wins")),
+                ("Solved in a row", app.stats.of(mode, "streak")),
+                ("Longest run", app.stats.of(mode, "best")),
+                ("Stars earned", app.stats.num("stars")),
+                ("Words collected", app.learned.len() as i64),
+            ] {
+                lines.push(centered(vec![(format!("{name:<18}"), dim), (format!("{number:>7}"), text.bold())]));
+            }
             let buttons = match game.status {
                 Status::Playing => vec![("W Words", Action::Words), ("Esc Close", Action::Close)],
                 _ => vec![("N New", Action::New), ("C Copy", Action::Copy), ("W Words", Action::Words), ("Esc", Action::Close)],
@@ -1013,7 +1024,43 @@ mod tests {
         fits(&app, "Stats, won");
         let s = screen(&mut app, 80, 24);
         assert!(has(&s, "YOU DID IT!") && has(&s, "★★★  Solved in 1/8") && has(&s, "SKEIN: a loose bundle of yarn or"), "{s:#?}");
+        // Each number has its name beside it.
+        app.stats.set("practice_wins", 6);
+        app.stats.set("practice_streak", 5);
+        app.stats.set("practice_best", 7);
+        app.stats.set("stars", 18);
+        let s = screen(&mut app, 80, 24);
+        for line in
+            ["Words solved            6", "Solved in a row         5", "Longest run             7", "Stars earned           18", "Words collected         1"]
+        {
+            assert!(has(&s, line), "{line:?} in {s:#?}");
+        }
         assert!(has(&s, "╭") && has(&s, "╯") && has(&s, " Esc "));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// The stars, the word and "Solved" are colored text on the dialog, and must be
+    /// readable there in every theme.
+    #[test]
+    fn colored_text_in_a_dialog_can_be_read_in_every_theme() {
+        let (mut app, dir) = app("dialog-colors");
+        app.game.add_guess(game::word("CRANE").unwrap());
+        app.modal = Modal::Stats;
+        for name in theme::NAMES.into_iter().filter(|name| *name != "terminal") {
+            app.theme = theme::theme(name, true);
+            let d = dialog(&app).unwrap();
+            let panel = app.theme.panel;
+            let on_panel = |c: Color| {
+                [app.theme.y, app.theme.g, app.theme.accent, app.theme.fg, app.theme.dim]
+                    .into_iter()
+                    .find(|p| p.fg == c)
+                    .map(|p| theme::brightness(p).abs_diff(theme::brightness(panel)))
+            };
+            for (text, style) in d.lines.iter().flat_map(|l| &l.spans).filter(|(text, _)| !text.trim().is_empty()) {
+                let contrast = style.fg.and_then(on_panel).unwrap_or_else(|| panic!("{name}: {text:?} is in a color no role has"));
+                assert!(contrast >= 50, "{name}: {text:?} has a contrast of {contrast} on the dialog");
+            }
+        }
         let _ = std::fs::remove_dir_all(dir);
     }
 

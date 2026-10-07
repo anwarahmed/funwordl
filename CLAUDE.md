@@ -1,7 +1,8 @@
 # funwordl
 
 A playful Wordle-style word game for the terminal (TUI), made for children: wordl with
-sounds, stars, confetti, a collection of words learned, and an Easy level with hints. It
+sounds, hints, stars, confetti, a collection of words learned, many bright themes and
+an Easy level. It
 fills the terminal and rescales with it. Rust + ratatui, targets macOS and Linux.
 `README.md` is for players; this file is for whoever changes the code.
 
@@ -86,13 +87,14 @@ Single binary crate, no async. One file per concern in `src/`:
 | `sound.rs`  | The cues, their notes made into WAV files, and handing a file to the system's audio player |
 | `layout.rs` | `layout(cols, rows, tries)`: sizes and positions for a terminal size and a board of six or eight rows |
 | `font.rs`   | Two bitmap fonts and `glyph` (wordl's, unchanged) |
-| `theme.rs`  | Color themes as roles (wordl's), plus the party colors and the default theme |
+| `theme.rs`  | Color themes as roles: wordl's five dark ones and `terminal`, funwordl's fifteen bright ones, the party colors and the default theme |
 
 ### What is funwordl's own
 
 - **Levels are a thin layer over wordl's rules** (`level.rs`). A `Level` is a
   `Difficulty` plus a number of guesses: Easy is `Difficulty::Normal` with eight,
-  the others are wordl's three with six. Nothing else is stored: `Level::of(&game)`
+  the others are wordl's three with six. `Level::hints` says which have hints: Easy
+  and Normal. Nothing else is stored: `Level::of(&game)`
   reads the level back from the game (more than six guesses means Easy), which is why
   the saved daily puzzle needs no new field. The chosen level is `level=0..3` in the
   statistics file (0 is Easy); absent means `Level::DEFAULT`, which is Normal.
@@ -120,7 +122,7 @@ Single binary crate, no async. One file per concern in `src/`:
     or in its place when animations are off.
   - The switch is `Ctrl-A` (`Action::Sound`), saved as `sound=0|1`; `--no-sound` and
     `FUNWORDL_NO_SOUND` are for one run. It has no footer item: there is no room.
-- **Hints** (`Action::Hint`, Easy only). `App::hints` counts them; the first is the
+- **Hints** (`Action::Hint`, on Easy and Normal). `App::hints` counts them; the first is the
   meaning, each later one pushes a spot onto `hint_letters`, up to `MAX_HINTS`. The
   spot is the first of 0, 2, 4, 1, 3 that is neither given already nor green in a
   guess, so a hint never tells what is known. Tab in the game takes the first hint or
@@ -164,6 +166,41 @@ Single binary crate, no async. One file per concern in `src/`:
   24-row terminal. Adding a line means taking one out.
 - **The result's buttons are `N New`, `C Copy`, `W Words`, `Esc`**: exactly 35
   columns. A longer label does not fit; a test checks every dialog.
+- **The stars dialog gives one number to a line, with its name in front** ("Words
+  solved 6"). 0.1.x had four headings in a row over four numbers, and the user
+  could not tell what they meant: "Solved In a row Best Stars" reads as one phrase.
+- **Colored text in a dialog falls back when it cannot be read.** Stars and the word
+  are written in the theme's yellow and "Solved" in its green, but a pale yellow on
+  a pale dialog disappears, so `dialog` swaps in the accent or the text color when
+  the brightness is within 70 of the panel's. A test checks every theme.
+- **Themes: the clues keep their colors** (the user's rule, 0.1.2): right spot is a
+  green and wrong spot a yellow or an orange on every theme, in a shade chosen to
+  suit the background. A test checks the hues, in truecolor and that neither turns
+  gray in 256 colors (`contrast`, orange and blue for color-blind players, is the
+  one exception).
+- **Not in the word is gray on the dark themes and a darker shade of the background
+  on the bright ones** (the user, 0.1.2: a gray block looked out of place on a
+  colored background). The shade is the background at 58% (50% on `ruby` and
+  `grape`). On the green themes it is also pulled most of the way to gray, because a
+  dark green tile beside the green of a right letter says the wrong thing. A test
+  checks that it is darker than the screen, of the screen's color, and not close to
+  that theme's green or yellow. `daylight`'s is gray: that is what a shade of white
+  is.
+- What a bright theme may take from its palette is everything else: keys, frames, accent,
+  dialogs, buttons, the message chip. Those are picked to complement the background
+  (blue keys on pink, purple buttons on green, gold on purple), mostly from
+  well-known five-color palettes, named in a comment above each theme.
+- **`ruby` and `grape` are bright themes with light writing**: their backgrounds are
+  too strong for dark text to reach the contrast the test asks for, so text is light
+  and their dialogs are dark.
+- **Party colors step aside** (`Theme::party`): one that is nearly the screen's own
+  color (red on `cherry`, purple on `grape`) is replaced by a dark stand-in, or a
+  title letter and a share of the confetti would vanish.
+- **A theme's background must survive 256 colors.** The nearest of 256 can be another
+  color altogether: `paper`'s cream had to stay (246, 238, 214), because the cream
+  of the palette it otherwise follows lands on light gray, and `mint` with a little
+  more blue in it came out pale cyan. Look at a new theme with
+  and without `COLORTERM`.
 - **Its own daily word** (`app::daily_answer`, `DAILY_BASE`): a different formula from
   wordl's, so that playing one game does not give away the other. A test checks they
   rarely coincide.
@@ -205,6 +242,22 @@ dialog lines of at most 35 characters, tests beside the code.
   sees the game as a way for them to learn words, so the first hint is the meaning,
   which is the thing worth learning, and letters come only after.
 - **Bright by default** (`theme::DEFAULT` is `candy`). wordl's default is `midnight`.
+- **Fifteen bright themes** (0.1.2; there were four). The user asked for "more bright
+  background themes, including a few reddish backgrounds" (`coral`, `cherry`,
+  `ruby`, and orange `sunset`), then "some purplish and greenish themes" (`lavender`,
+  `orchid`, `grape`; `mint`, `meadow`, `sage`), and for the other colors of a bright
+  theme to be complementary, from popular palettes; `candy`, `sky` and `paper` were
+  retuned to that, `daylight` was left (white has no complement). The user then
+  made the limit explicit: the clue colors "stick to the green, yellow/orange and
+  grey shades", and "the dark backgrounds that you have now are great", so the five
+  dark themes are wordl's, untouched. On seeing gray described, the user changed
+  the third: "instead of grey you can use a darker shade of the background color. I
+  don't want the blocks to look out of place." The palettes were chosen and looked at by
+  Claude as drawn pictures, in truecolor; **not yet seen by the user**.
+- **Hints on Normal as well as Easy** (asked for by the user, 0.1.2). After 0.1.1
+  made Normal the default, a new player had no hints at all unless they found Easy.
+  Hard and Ultra Hard stay without: a hint would hand over what their rules make the
+  player work out. Stars cost the same on both.
 - **Friendlier wording**: "I don't know that word", "So close! It was CRANE",
   "NICE TRY", "Show the word?" for giving up (the footer says "Reveal").
 - **The player's history lives in wordl's `Stats` file format**, with funwordl's own
@@ -262,7 +315,14 @@ should always be. To check sound without making any, put a stand-in `pw-play` fi
 copies with `--volume 0`. To catch confetti in a picture, take it about 2.7 seconds after the
 winning Enter. `tools/screenshot.py` needs the theme's background color as its third
 argument, because tmux does not report trailing blank cells: without it the right of
-every row comes out black.
+every row comes out black. It also draws the first key of a keyboard row (Q,
+Backspace) with a pale letter on themes whose key letters are the color of the
+screen's text: tmux leaves that color out of what it reports there. The game's own
+output is right; only the picture is off.
+
+To judge themes, draw each one and put them side by side (`montage`, from
+ImageMagick): a game with a green, a yellow and a gray tile, typed letters, and a
+dialog open.
 
 The traps listed in wordl's `CLAUDE.md` apply (`send-keys Escape` followed at once by
 a key arrives as Alt+key; never test copying against the real clipboard).
@@ -273,6 +333,10 @@ a key arrives as Alt+key; never test copying against the real clipboard).
   tmux. Whether eight guesses, four hints and the star rule feel right is unknown.
 - Never run by a person on a real Mac; CI runs the tests on a macOS runner.
 - The Intel macOS binary is cross-built and never executed in CI.
+- With twenty-one themes, `Ctrl-T` is a long walk round, and there is no way to pick
+  one from a list in the game (`--theme NAME` does it from the command line).
+- The theme test sweep draws every theme at every size and takes about a minute in a
+  debug build.
 - The sounds have not been heard by anyone but a machine (see "Sounds" above). There
   is no volume setting; the system's volume is the only one.
 - Typing and the keys of the on-screen keyboard make no sound.
