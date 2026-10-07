@@ -184,10 +184,14 @@ dialog lines of at most 35 characters, tests beside the code.
   funwordl gets its copy through the library, so a fix in wordl's `update.rs` arrives
   with the next `rev`; `install.sh` and `release.yml` here are copies and have to be
   changed by hand when wordl's change.
-- **Not set up yet:** the `TAP_TOKEN` secret (until then a release warns and the
-  formula follows on the tap's three-hourly schedule or by hand), and the AUR (the
-  user has no AUR account; the `PKGBUILD` attached to each release is installed with
-  `makepkg -si`).
+- **Homebrew:** the `TAP_TOKEN` secret here (set by the user on 2026-10-07, after
+  0.1.0 was released without it) lets a release start the tap's workflow and wait for
+  the formula. No release has used it yet, so the first one after 0.1.0 is its test.
+  If it is missing the release run carries a "Homebrew tap not notified" warning; if
+  it is rejected or has expired the run fails at that step, after the release is
+  already published, and the user has to create a new token.
+- **Not set up yet:** the AUR (the user has no AUR account; the `PKGBUILD` attached to
+  each release is installed with `makepkg -si`).
 
 ## Verifying changes
 
