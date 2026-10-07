@@ -389,7 +389,7 @@ pub fn theme(name: &str, truecolor: bool) -> Theme {
         (96, 100, 132), // typed
         (78, 140, 110), // g
         (228, 164, 72), // y
-        (132, 130, 138), // x
+        (143, 138, 124), // x
         (150, 206, 176), // win
         (255, 255, 255), // gfg
         (46, 48, 72), // yfg
@@ -414,7 +414,7 @@ pub fn theme(name: &str, truecolor: bool) -> Theme {
         (33, 118, 150), // typed
         (30, 150, 96), // g
         (255, 183, 3), // y
-        (104, 116, 128), // x
+        (93, 123, 138), // x
         (120, 220, 160), // win
         (255, 255, 255), // gfg
         (2, 48, 71), // yfg
@@ -439,7 +439,7 @@ pub fn theme(name: &str, truecolor: bool) -> Theme {
         (88, 112, 190), // typed
         (30, 160, 110), // g
         (240, 160, 20), // y
-        (140, 124, 136), // x
+        (148, 119, 131), // x
         (120, 226, 176), // win
         (255, 255, 255), // gfg
         (255, 255, 255), // yfg
@@ -464,7 +464,7 @@ pub fn theme(name: &str, truecolor: bool) -> Theme {
         (120, 44, 44), // typed
         (30, 136, 92), // g
         (255, 221, 120), // y
-        (112, 100, 104), // x
+        (148, 93, 79), // x
         (80, 200, 140), // win
         (255, 255, 255), // gfg
         (28, 36, 54), // yfg
@@ -489,11 +489,11 @@ pub fn theme(name: &str, truecolor: bool) -> Theme {
         (120, 24, 36), // typed
         (22, 122, 82), // g
         (255, 230, 109), // y
-        (110, 92, 96), // x
+        (148, 62, 62), // x
         (90, 210, 150), // win
         (255, 255, 255), // gfg
         (26, 83, 92), // yfg
-        (255, 244, 244), // xfg
+        (255, 255, 255), // xfg
         (247, 255, 247), // key
         (26, 83, 92), // keyfg
         (228, 90, 94), // keyx
@@ -514,11 +514,11 @@ pub fn theme(name: &str, truecolor: bool) -> Theme {
         (255, 214, 214), // typed
         (26, 134, 86), // g
         (255, 214, 102), // y
-        (92, 80, 84), // x
+        (112, 41, 48), // x
         (80, 200, 140), // win
         (255, 255, 255), // gfg
         (70, 16, 28), // yfg
-        (244, 236, 236), // xfg
+        (255, 226, 226), // xfg
         (255, 236, 230), // key
         (70, 16, 28), // keyfg
         (190, 62, 78), // keyx
@@ -539,7 +539,7 @@ pub fn theme(name: &str, truecolor: bool) -> Theme {
         (130, 70, 30), // typed
         (46, 148, 100), // g
         (246, 214, 130), // y
-        (122, 112, 106), // x
+        (142, 94, 56), // x
         (96, 204, 150), // win
         (255, 255, 255), // gfg
         (30, 58, 70), // yfg
@@ -564,7 +564,7 @@ pub fn theme(name: &str, truecolor: bool) -> Theme {
         (150, 128, 60), // typed
         (74, 140, 88), // g
         (224, 159, 62), // y
-        (146, 142, 128), // x
+        (148, 141, 102), // x
         (130, 200, 140), // win
         (255, 255, 255), // gfg
         (255, 255, 255), // yfg
@@ -582,14 +582,14 @@ pub fn theme(name: &str, truecolor: bool) -> Theme {
         (255, 255, 255), // btnfg
         ]),
         "mint" => from_rgb("mint", truecolor, [
-        (183, 228, 199), // bg
+        (183, 228, 190), // bg
         (27, 67, 50), // fg
         (70, 120, 96), // dim
         (140, 200, 166), // empty
         (64, 145, 108), // typed
-        (45, 106, 79), // g
+        (28, 122, 80), // g
         (240, 170, 40), // y
-        (120, 134, 128), // x
+        (112, 123, 113), // x
         (116, 198, 157), // win
         (255, 255, 255), // gfg
         (255, 255, 255), // yfg
@@ -612,9 +612,9 @@ pub fn theme(name: &str, truecolor: bool) -> Theme {
         (78, 112, 50), // dim
         (140, 196, 96), // empty
         (70, 120, 50), // typed
-        (34, 120, 70), // g
+        (24, 124, 62), // g
         (226, 140, 20), // y
-        (116, 122, 112), // x
+        (103, 115, 91), // x
         (90, 200, 120), // win
         (255, 255, 255), // gfg
         (255, 255, 255), // yfg
@@ -637,9 +637,9 @@ pub fn theme(name: &str, truecolor: bool) -> Theme {
         (110, 116, 84), // dim
         (170, 182, 138), // empty
         (120, 110, 80), // typed
-        (88, 129, 87), // g
+        (58, 128, 66), // g
         (221, 161, 94), // y
-        (130, 128, 116), // x
+        (116, 119, 108), // x
         (140, 190, 130), // win
         (255, 255, 255), // gfg
         (255, 255, 255), // yfg
@@ -664,7 +664,7 @@ pub fn theme(name: &str, truecolor: bool) -> Theme {
         (120, 90, 150), // typed
         (60, 150, 110), // g
         (232, 150, 20), // y
-        (134, 128, 144), // x
+        (130, 108, 132), // x
         (120, 214, 160), // win
         (255, 255, 255), // gfg
         (255, 255, 255), // yfg
@@ -689,7 +689,7 @@ pub fn theme(name: &str, truecolor: bool) -> Theme {
         (110, 50, 120), // typed
         (30, 146, 96), // g
         (255, 214, 90), // y
-        (128, 118, 134), // x
+        (124, 86, 124), // x
         (90, 214, 170), // win
         (255, 255, 255), // gfg
         (48, 16, 60), // yfg
@@ -714,11 +714,11 @@ pub fn theme(name: &str, truecolor: bool) -> Theme {
         (224, 200, 246), // typed
         (40, 170, 120), // g
         (255, 210, 80), // y
-        (176, 168, 190), // x
+        (62, 38, 85), // x
         (110, 230, 170), // win
         (255, 255, 255), // gfg
         (50, 24, 80), // yfg
-        (50, 24, 80), // xfg
+        (236, 222, 250), // xfg
         (240, 230, 255), // key
         (50, 24, 80), // keyfg
         (98, 58, 140), // keyx
@@ -825,19 +825,57 @@ mod tests {
         assert_eq!(theme("midnight", true).party().0.map(|p| p.rgb.unwrap()), PARTY);
     }
 
-    /// Whatever the background, the three clues keep their meaning by color: right spot
-    /// is a green, wrong spot a yellow or an orange, not in the word a gray. Only
-    /// `contrast` differs, on purpose: orange and blue, for color-blind players.
+    const DARK: [&str; 5] = ["midnight", "neon", "contrast", "ocean", "ember"];
+
+    /// Whatever the background, two clues keep their meaning by color: right spot is a
+    /// green, wrong spot a yellow or an orange. Only `contrast` differs, on purpose:
+    /// orange and blue, for color-blind players.
     #[test]
-    fn clue_colors_are_green_yellow_and_gray_in_every_theme() {
+    fn right_and_wrong_spot_are_green_and_yellow_in_every_theme() {
         for name in NAMES.into_iter().filter(|name| !["terminal", "contrast"].contains(name)) {
             let th = theme(name, true);
-            let (g, y, x) = (th.g.rgb.unwrap(), th.y.rgb.unwrap(), th.x.rgb.unwrap());
+            let (g, y) = (th.g.rgb.unwrap(), th.y.rgb.unwrap());
             assert!((100.0..=165.0).contains(&hue(g)), "{name}: green is at {}", hue(g));
             assert!((25.0..=60.0).contains(&hue(y)), "{name}: yellow is at {}", hue(y));
-            let spread = x.0.max(x.1).max(x.2) - x.0.min(x.1).min(x.2);
-            // A gray may lean towards its theme (the dark themes' do), but not far.
-            assert!(spread <= 60, "{name}: gray has too much color in it ({spread})");
+            // In 256 colors too: a green near enough to gray lands on the gray ramp
+            // (indexes 232 and up) and the clue is lost.
+            let th = theme(name, false);
+            for (what, paint) in [("green", th.g), ("yellow", th.y)] {
+                assert!(matches!(paint.bg, Color::Indexed(i) if i < 232), "{name}: {what} turns gray in 256 colors");
+            }
+        }
+    }
+
+    /// A letter that is not in the word is gray on the dark themes. On the bright ones
+    /// a gray tile looked out of place, so there it is a darker shade of the
+    /// background: the same color, well below it in brightness, and never one that
+    /// could pass for the green or the yellow.
+    #[test]
+    fn not_in_the_word_is_gray_on_dark_themes_and_a_shade_of_the_screen_on_bright_ones() {
+        for name in NAMES.into_iter().filter(|name| *name != "terminal") {
+            let th = theme(name, true);
+            let (x, bg) = (th.x.rgb.unwrap(), th.bg.rgb.unwrap());
+            let spread = |c: (u8, u8, u8)| c.0.max(c.1).max(c.2) - c.0.min(c.1).min(c.2);
+            if DARK.contains(&name) {
+                // A gray may lean towards its theme, but not far.
+                assert!(spread(x) <= 60, "{name}: gray has too much color in it ({})", spread(x));
+                continue;
+            }
+            assert!(brightness(th.bg) >= brightness(th.x) + 40, "{name}: not darker than the screen");
+            // The same color as the screen: where the screen has one, its strongest and
+            // weakest of red, green and blue are the tile's too.
+            if spread(bg) > 30 {
+                let order = |c: (u8, u8, u8)| {
+                    let v = [c.0, c.1, c.2];
+                    ((0..3).max_by_key(|&i| v[i]).unwrap(), (0..3).min_by_key(|&i| v[i]).unwrap())
+                };
+                assert_eq!(order(x), order(bg), "{name}: {x:?} is not a shade of {bg:?}");
+            }
+            for (what, clue) in [("green", th.g), ("yellow", th.y)] {
+                let c = clue.rgb.unwrap();
+                let d = |a: u8, b: u8| (a as i32 - b as i32).pow(2);
+                assert!(d(x.0, c.0) + d(x.1, c.1) + d(x.2, c.2) >= 60 * 60, "{name}: {x:?} could pass for the {what} {c:?}");
+            }
         }
     }
 
@@ -861,6 +899,8 @@ mod tests {
     fn falls_back_to_256_colors() {
         // Cream must stay cream: a little less green and it lands on the cube's pink.
         assert_eq!(theme("paper", false).bg.bg, Color::Indexed(230));
+        // And mint must stay green: a little more blue and it is the cube's pale cyan.
+        assert_eq!(theme("mint", false).bg.bg, Color::Indexed(151));
         // A dark blue-gray background must not turn into the cube's dark blue.
         assert_eq!(nearest_256(17, 19, 26), Color::Indexed(233));
         assert_eq!(nearest_256(255, 255, 255), Color::Indexed(231));

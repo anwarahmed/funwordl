@@ -173,11 +173,20 @@ Single binary crate, no async. One file per concern in `src/`:
   are written in the theme's yellow and "Solved" in its green, but a pale yellow on
   a pale dialog disappears, so `dialog` swaps in the accent or the text color when
   the brightness is within 70 of the panel's. A test checks every theme.
-- **Themes: the three clues keep their colors** (the user's rule, 0.1.2): right spot
-  is a green, wrong spot a yellow or an orange, not in the word a gray, on every
-  theme. Only the shade is chosen to suit the background. A test checks the hues
-  (`contrast`, orange and blue for color-blind players, is the one exception). What
-  a bright theme may take from its palette is everything else: keys, frames, accent,
+- **Themes: the clues keep their colors** (the user's rule, 0.1.2): right spot is a
+  green and wrong spot a yellow or an orange on every theme, in a shade chosen to
+  suit the background. A test checks the hues, in truecolor and that neither turns
+  gray in 256 colors (`contrast`, orange and blue for color-blind players, is the
+  one exception).
+- **Not in the word is gray on the dark themes and a darker shade of the background
+  on the bright ones** (the user, 0.1.2: a gray block looked out of place on a
+  colored background). The shade is the background at 58% (50% on `ruby` and
+  `grape`). On the green themes it is also pulled most of the way to gray, because a
+  dark green tile beside the green of a right letter says the wrong thing. A test
+  checks that it is darker than the screen, of the screen's color, and not close to
+  that theme's green or yellow. `daylight`'s is gray: that is what a shade of white
+  is.
+- What a bright theme may take from its palette is everything else: keys, frames, accent,
   dialogs, buttons, the message chip. Those are picked to complement the background
   (blue keys on pink, purple buttons on green, gold on purple), mostly from
   well-known five-color palettes, named in a comment above each theme.
@@ -189,7 +198,8 @@ Single binary crate, no async. One file per concern in `src/`:
   title letter and a share of the confetti would vanish.
 - **A theme's background must survive 256 colors.** The nearest of 256 can be another
   color altogether: `paper`'s cream had to stay (246, 238, 214), because the cream
-  of the palette it otherwise follows lands on light gray. Look at a new theme with
+  of the palette it otherwise follows lands on light gray, and `mint` with a little
+  more blue in it came out pale cyan. Look at a new theme with
   and without `COLORTERM`.
 - **Its own daily word** (`app::daily_answer`, `DAILY_BASE`): a different formula from
   wordl's, so that playing one game does not give away the other. A test checks they
@@ -240,7 +250,9 @@ dialog lines of at most 35 characters, tests beside the code.
   retuned to that, `daylight` was left (white has no complement). The user then
   made the limit explicit: the clue colors "stick to the green, yellow/orange and
   grey shades", and "the dark backgrounds that you have now are great", so the five
-  dark themes are wordl's, untouched. The palettes were chosen and looked at by
+  dark themes are wordl's, untouched. On seeing gray described, the user changed
+  the third: "instead of grey you can use a darker shade of the background color. I
+  don't want the blocks to look out of place." The palettes were chosen and looked at by
   Claude as drawn pictures, in truecolor; **not yet seen by the user**.
 - **Hints on Normal as well as Easy** (asked for by the user, 0.1.2). After 0.1.1
   made Normal the default, a new player had no hints at all unless they found Easy.

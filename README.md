@@ -232,9 +232,10 @@ Dark: `midnight`, `neon`, `contrast`, `ocean` and `ember`.
 And `terminal`, which uses only your terminal's own 16 colors, so it follows your
 terminal theme.
 
-On every theme a letter in the right spot is green, one in the wrong spot is yellow or
-orange, and one that is not in the word is gray; only their shades change to suit the
-background. The exception is `contrast`, which uses orange and blue instead, for
+On every theme a letter in the right spot is green and one in the wrong spot is yellow
+or orange, in shades that suit the background. A letter that is not in the word is
+gray on the dark themes and a darker shade of the background on the bright ones. The
+exception is `contrast`, which uses orange and blue instead of green and yellow, for
 color-blind players.
 
 ### Terminal size
