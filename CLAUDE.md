@@ -223,7 +223,7 @@ dialog lines of at most 35 characters, tests beside the code.
   changed by hand when wordl's change.
 - **Homebrew:** the `TAP_TOKEN` secret here (set by the user on 2026-10-07, after
   0.1.0 was released without it) lets a release start the tap's workflow and wait for
-  the formula. No release has used it yet, so the first one after 0.1.0 is its test.
+  the formula. It has worked since 0.1.1, the first release to use it.
   If it is missing the release run carries a "Homebrew tap not notified" warning; if
   it is rejected or has expired the run fails at that step, after the release is
   already published, and the user has to create a new token.
