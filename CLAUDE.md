@@ -1,7 +1,7 @@
 # funwordl
 
-A playful Wordle-style word game for the terminal (TUI), made for children: easier by
-default than wordl, with hints, stars, confetti and a collection of words learned. It
+A playful Wordle-style word game for the terminal (TUI), made for children: wordl with
+sounds, stars, confetti, a collection of words learned, and an Easy level with hints. It
 fills the terminal and rescales with it. Rust + ratatui, targets macOS and Linux.
 `README.md` is for players; this file is for whoever changes the code.
 
@@ -83,6 +83,7 @@ Single binary crate, no async. One file per concern in `src/`:
 | `app.rs`    | `App` state, all key and mouse handling, what each action does, hints, stars, the collection, animation timing |
 | `ui.rs`     | All drawing, and the geometry that says what a click landed on. Pure functions of `&App` |
 | `level.rs`  | The four levels and how they map onto wordl's rules; `stars` |
+| `sound.rs`  | The cues, their notes made into WAV files, and handing a file to the system's audio player |
 | `layout.rs` | `layout(cols, rows, tries)`: sizes and positions for a terminal size and a board of six or eight rows |
 | `font.rs`   | Two bitmap fonts and `glyph` (wordl's, unchanged) |
 | `theme.rs`  | Color themes as roles (wordl's), plus the party colors and the default theme |
@@ -94,11 +95,31 @@ Single binary crate, no async. One file per concern in `src/`:
   the others are wordl's three with six. Nothing else is stored: `Level::of(&game)`
   reads the level back from the game (more than six guesses means Easy), which is why
   the saved daily puzzle needs no new field. The chosen level is `level=0..3` in the
-  statistics file; absent means Easy.
+  statistics file (0 is Easy); absent means `Level::DEFAULT`, which is Normal.
 - **Easier at once, harder next game.** `Ctrl-X` goes Easy, Normal, Hard, Ultra Hard
   and round again. A game under way takes the new level only if it is easier or
   nothing has happened yet (no guess, no hint): earlier guesses were not held to
   stricter rules, and hints may have been used.
+- **Sound** (`sound.rs`, since the change after 0.1.0). A `Cue` is a list of notes
+  (start, frequency, length); `Cue::samples` mixes them into 16-bit mono at 22050 Hz,
+  each note with a quick rise and a bell-like decay, and `wav` wraps that as a file.
+  Both are pure and unit-tested. `Sound::play` writes the file into a directory of
+  the run's own under the system temp directory (removed when the game ends) and
+  starts the first player found on `PATH` of `afplay`, `pw-play`, `paplay`,
+  `aplay -q`, with nothing of the player's reaching the terminal. It never waits and
+  never fails; at most four play at once. Things to keep:
+  - **The tests must stay silent.** `find_player` returns nothing under `cfg(test)`,
+    every `Options` in a test has `sound: false`, and every start of the game in
+    `tests/e2e.sh` sets `FUNWORDL_NO_SOUND=1`. A test that wants to see cues sets
+    `app.sound.on` and reads `app.sound.log`.
+  - **A guess is one cue, not five.** `Cue::Reveal(marks, step)` holds a note per
+    tile spaced by the flip's length, so the notes stay in step with the animation
+    without a process per tile. (That is also why typing makes no sound: a player
+    takes tens of milliseconds to start, and a key press cannot wait.)
+  - **The end of a game sounds after the reveal** (`App::end_sound`, from `tick`),
+    or in its place when animations are off.
+  - The switch is `Ctrl-A` (`Action::Sound`), saved as `sound=0|1`; `--no-sound` and
+    `FUNWORDL_NO_SOUND` are for one run. It has no footer item: there is no room.
 - **Hints** (`Action::Hint`, Easy only). `App::hints` counts them; the first is the
   meaning, each later one pushes a spot onto `hint_letters`, up to `MAX_HINTS`. The
   spot is the first of 0, 2, 4, 1, 3 that is neither given already nor green in a
@@ -136,8 +157,11 @@ Single binary crate, no async. One file per concern in `src/`:
   as tiles; `draw_title` then writes it small, a colored letter per cell, to keep the
   info. `layout::TITLE_LETTERS` is used wherever the title's width matters.
 - **The footer has nine items** and must show its labels at 80 columns; they add up to
-  77 with "Normal", the longest level name the footer shows. The collection has no
-  footer item for that reason: it is `Ctrl-W`, and a button in the stars dialog.
+  77 with "Normal", the longest level name the footer shows. The collection and the
+  sound switch have no footer item for that reason: they are `Ctrl-W` (also a button
+  in the stars dialog) and `Ctrl-A`, both in the help.
+- **The help is exactly 20 lines**, which with its frame and button is all of a
+  24-row terminal. Adding a line means taking one out.
 - **The result's buttons are `N New`, `C Copy`, `W Words`, `Esc`**: exactly 35
   columns. A longer label does not fit; a test checks every dialog.
 - **Its own daily word** (`app::daily_answer`, `DAILY_BASE`): a different formula from
@@ -160,10 +184,22 @@ dialog lines of at most 35 characters, tests beside the code.
 - **The core is shared as wordl's library** (asked for by the user: "is there a way to
   sync the shared core"). See wordl's `CLAUDE.md`, "A library and a game", for what
   was considered instead.
-- **Easier by default, the harder levels still there** (the user's words). What Easy
-  means was proposed by Claude and accepted as part of "go ahead": eight guesses,
-  hints, and no penalty for a word not solved. The numbers (eight, four hints, three
-  stars) are Claude's choices and have not been played by a child yet.
+- **The game starts on Normal; Easy is a level to choose** (the user, after trying
+  0.1.0: "Start the game on normal difficulty"). 0.1.0 started on Easy, because the
+  first request was for rules "easier by default, but have the option for more
+  difficult levels". Only what an absent `level` means changed: a player who chose a
+  level, Easy included, keeps it. What Easy means was proposed by Claude and accepted
+  as part of "go ahead": eight guesses, hints, and no penalty for a word not solved.
+  The numbers (eight, four hints, three stars) are Claude's choices and have not been
+  played by a child yet.
+- **Sounds, with a way to turn them off** (asked for by the user after trying 0.1.0).
+  They are played by the system's own audio player, not by an audio library: a
+  library (rodio, cpal) links ALSA on Linux, which the static musl release binaries
+  cannot do, and would be the project's first dependency with system requirements.
+  The terminal bell was not used: it is one sound, often muted or turned into a
+  flash, and cannot tell a win from a mistake. Which notes are played is Claude's
+  choice, checked by machine (length, loudness, a real player accepts the files) but
+  **not heard by Claude**: only a person can say whether they are pleasant.
 - **Hints teach before they tell.** The players are children up to 13 and the user
   sees the game as a way for them to learn words, so the first hint is the meaning,
   which is the thing worth learning, and letters come only after.
@@ -195,7 +231,8 @@ dialog lines of at most 35 characters, tests beside the code.
 
 ## Verifying changes
 
-`cargo test` covers the levels, hints, stars and collection (`app.rs`, `level.rs`), the
+`cargo test` covers the levels, hints, stars, collection and which sounds are asked
+for when (`app.rs`, `level.rs`, `sound.rs`), the
 layout at every size for six and eight rows, and drawing every theme and dialog at a
 dozen sizes into ratatui's `TestBackend`. `tests/e2e.sh` runs the built binary: the
 command line, `install.sh`, the updater against made-up releases, and the game in a
@@ -218,7 +255,10 @@ tmux -L funwordl-test kill-server                      # only ever with -L
 ```
 
 `FUNWORDL_DEBUG_ANSWER` fixes the practice word; `FUNWORDL_NO_ANIM=1` skips
-animations. To catch confetti in a picture, take it about 2.7 seconds after the
+animations; `FUNWORDL_NO_SOUND=1` keeps it quiet, which a session driven by a script
+should always be. To check sound without making any, put a stand-in `pw-play` first on
+`PATH` that copies its argument somewhere, play, and then run the real player on the
+copies with `--volume 0`. To catch confetti in a picture, take it about 2.7 seconds after the
 winning Enter. `tools/screenshot.py` needs the theme's background color as its third
 argument, because tmux does not report trailing blank cells: without it the right of
 every row comes out black.
@@ -232,6 +272,9 @@ a key arrives as Alt+key; never test copying against the real clipboard).
   tmux. Whether eight guesses, four hints and the star rule feel right is unknown.
 - Never run by a person on a real Mac; CI runs the tests on a macOS runner.
 - The Intel macOS binary is cross-built and never executed in CI.
+- The sounds have not been heard by anyone but a machine (see "Sounds" above). There
+  is no volume setting; the system's volume is the only one.
+- Typing and the keys of the on-screen keyboard make no sound.
 - No mascot. A pixel-art character that reacts to guesses was among the ideas put to
   the user and is not built; the layout has no place reserved for one.
 - On Easy at 80x24 the tiles are one row high, because eight rows of the next size do
@@ -243,5 +286,4 @@ a key arrives as Alt+key; never test copying against the real clipboard).
 - The README pictures are drawn by `tools/screenshot.py` from tmux's cell data, not
   captured from a terminal window.
 - Dialogs taller than the terminal lose their last lines (the help is 20 lines).
-- Not done: sound (the terminal bell was not tried), other word lengths, other
-  languages.
+- Not done: other word lengths, other languages.

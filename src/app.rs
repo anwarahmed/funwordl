@@ -12,6 +12,7 @@ use std::collections::BTreeMap;
 use crate::game::{self, Game, Mark, Mode, Status, Word};
 use crate::layout;
 use crate::level::{self, Level, MAX_HINTS};
+use crate::sound::{Cue, Sound};
 use crate::store::{self, Stats};
 use crate::theme::{self, Theme};
 use crate::{ui, words};
@@ -70,6 +71,8 @@ pub enum Action {
     Stats,
     Theme,
     Difficulty,
+    /// Switch sound on or off.
+    Sound,
     /// Show the hints; the first time, and from inside the hint dialog, take one more.
     Hint,
     /// Open the collection of words met so far.
@@ -109,6 +112,8 @@ pub struct Options {
     pub theme: Option<String>,
     pub level: Option<Level>,
     pub animate: bool,
+    /// Whether sounds are wanted; the tests and `FUNWORDL_NO_SOUND` say no.
+    pub sound: bool,
     pub truecolor: bool,
     /// Fixes the practice word, for tests (`FUNWORDL_DEBUG_ANSWER`).
     pub debug_answer: Option<Word>,
@@ -141,6 +146,7 @@ pub struct App {
     pub celebrate: Option<(usize, Instant)>,
     /// When the confetti started falling.
     pub confetti: Option<Instant>,
+    pub sound: Sound,
     animate: bool,
     /// The time of the frame being drawn; animations are a function of it.
     pub now: Instant,
@@ -161,8 +167,9 @@ pub fn today() -> i64 {
 impl App {
     pub fn new(mut stats: Stats, options: Options) -> Self {
         stats.expire_daily_streak(today());
-        // Easy unless another level was chosen: `level` is absent from a new file.
-        let chosen = options.level.unwrap_or_else(|| Level::from_index(stats.num("level").clamp(0, 3) as usize));
+        // Normal unless another level was chosen: `level` is absent from a new file.
+        let saved_level = stats.text("level").and_then(|v| v.parse::<usize>().ok()).filter(|&v| v <= 3).map_or(Level::DEFAULT, Level::from_index);
+        let chosen = options.level.unwrap_or(saved_level);
         let saved_theme = stats.text("theme").filter(|name| theme::NAMES.contains(name)).unwrap_or(theme::DEFAULT);
         let theme = theme::theme(options.theme.as_deref().unwrap_or(saved_theme), options.truecolor);
         let learned = store::read_pairs(&stats.dir().join("learned"));
@@ -185,6 +192,7 @@ impl App {
             shake: None,
             celebrate: None,
             confetti: None,
+            sound: Sound::new(options.sound),
             animate: options.animate,
             now: Instant::now(),
             quit: false,
@@ -266,6 +274,7 @@ impl App {
             self.hint_letters.push(spot);
         }
         self.hints += 1;
+        self.sound.play(Cue::Hint);
         self.save_hints();
     }
 
@@ -333,6 +342,7 @@ impl App {
         self.now = Instant::now();
         if self.reveal.is_some_and(|(_, start)| self.now >= start + FLIP * 5) {
             let (row, _) = self.reveal.take().unwrap();
+            self.end_sound();
             if self.game.status == Status::Won {
                 self.celebrate = Some((row, self.now));
             } else {
@@ -389,6 +399,15 @@ impl App {
         .map(|(text, kind)| Message { text, kind, until: None });
     }
 
+    /// The sound of a game that has just ended, if it has.
+    fn end_sound(&mut self) {
+        match self.game.status {
+            Status::Won => self.sound.play(Cue::Won),
+            Status::Lost => self.sound.play(Cue::Lost),
+            Status::Playing => {}
+        }
+    }
+
     /// Once a guess has been revealed: if that ended the game, say so and line up the
     /// statistics.
     fn after_guess(&mut self) {
@@ -415,6 +434,7 @@ impl App {
 
     fn refuse(&mut self, why: impl Into<String>, seconds: u64) {
         self.toast(why, MessageKind::Error, seconds);
+        self.sound.play(Cue::Refused);
         if self.animate {
             self.shake = Some(Instant::now());
         }
@@ -440,9 +460,18 @@ impl App {
         if !self.game.playing() {
             self.finish();
         }
+        // The tiles are heard as they turn: a note each, in step with the flip. The
+        // end of a game has its own sound, which follows the reveal; with animations
+        // off there is no reveal to wait for, so it is played in its place.
+        let marks = self.game.marks[self.game.guesses.len() - 1];
         if self.animate {
+            self.sound.play(Cue::Reveal(marks, FLIP.as_millis() as u32));
             self.reveal = Some((self.game.guesses.len() - 1, Instant::now()));
         } else {
+            if self.game.playing() {
+                self.sound.play(Cue::Reveal(marks, 70));
+            }
+            self.end_sound();
             self.after_guess();
         }
     }
@@ -517,6 +546,24 @@ impl App {
                     self.toast(format!("{} starts next game", self.chosen.name()), MessageKind::Plain, 3);
                 }
             }
+            Action::Sound => {
+                let on = !self.sound.on && self.sound.available();
+                let note = if on {
+                    "Sound: on"
+                } else if self.sound.on {
+                    "Sound: off"
+                } else {
+                    "No sound player found"
+                };
+                self.sound.on = on;
+                self.sound.play(Cue::On);
+                self.stats.set("sound", on as u8);
+                self.stats.save();
+                if self.modal == Modal::None && !self.small() {
+                    self.toast(note, MessageKind::Plain, 2);
+                    self.restore_end = !self.game.playing();
+                }
+            }
             Action::Hint => {
                 if !self.game.playing() || self.small() {
                     return;
@@ -558,6 +605,7 @@ impl App {
                     self.game.give_up();
                     self.stats.save_daily(&self.game);
                     self.finish();
+                    self.end_sound();
                     self.after_guess();
                 }
             }
@@ -584,6 +632,7 @@ impl App {
             KeyCode::Char('q' | 'c') if ctrl => return self.act(Action::Quit),
             KeyCode::Char('l') if ctrl => return self.repaint = true,
             KeyCode::Char('t') if ctrl => return self.act(Action::Theme),
+            KeyCode::Char('a') if ctrl => return self.act(Action::Sound),
             _ => {}
         }
         if self.small() {
@@ -682,12 +731,13 @@ mod tests {
 
     /// The game started again on the same saved files.
     fn reopen(dir: &std::path::Path, level: Option<Level>) -> App {
-        let options = Options { mode: Mode::Practice, theme: None, level, animate: false, truecolor: true, debug_answer: game::word("CRANE") };
+        let options = Options { mode: Mode::Practice, theme: None, level, animate: false, sound: false, truecolor: true, debug_answer: game::word("CRANE") };
         App::new(Stats::load(dir.to_path_buf()), options)
     }
 
+    /// Most of what is tested here is the Easy level's own.
     fn app(name: &str) -> (App, PathBuf) {
-        app_at(name, None)
+        app_at(name, Some(Level::Easy))
     }
 
     fn key(code: KeyCode) -> KeyEvent {
@@ -713,6 +763,10 @@ mod tests {
     fn a_game_is_typed_refused_and_won() {
         let (mut app, dir) = app("win");
         assert_eq!((app.chosen, app.game.tries, app.theme.name), (Level::Easy, 8, theme::DEFAULT));
+        // Left to itself the game starts on Normal, and remembers a level once chosen.
+        let (fresh, fresh_dir) = app_at("win-default", None);
+        assert_eq!((fresh.chosen, fresh.game.tries), (Level::Normal, 6));
+        let _ = std::fs::remove_dir_all(fresh_dir);
         type_word(&mut app, "sla");
         assert_eq!(message(&app), "Type 5 letters first");
         app.on_key(key(KeyCode::Backspace));
@@ -841,10 +895,14 @@ mod tests {
         assert_eq!((app.chosen, Level::of(&app.game), app.game.tries), (Level::Easy, Level::Easy, 8));
         app.on_key(ctrl('x'));
         assert_eq!((app.chosen, Level::of(&app.game), message(&app)), (Level::Normal, Level::Easy, "Normal starts next game"));
-        // The choice is remembered.
+        // The choice is remembered, Easy too.
         assert_eq!(reopen(&dir, None).chosen, Level::Normal);
+        app.on_key(ctrl('x'));
+        app.on_key(ctrl('x'));
+        app.on_key(ctrl('x'));
+        assert_eq!((app.chosen, reopen(&dir, None).chosen), (Level::Easy, Level::Easy));
         // A hint counts as having started, too.
-        let (mut app, dir2) = app_at("level-hint", None);
+        let (mut app, dir2) = app_at("level-hint", Some(Level::Easy));
         app.on_key(key(KeyCode::Tab));
         app.on_key(key(KeyCode::Esc));
         app.on_key(ctrl('x'));
@@ -946,6 +1004,55 @@ mod tests {
         app.on_key(ctrl('t'));
         assert_eq!((app.theme.name, message(&app)), (next, format!("Theme: {next}").as_str()));
         assert_eq!(reopen(&dir, None).theme.name, next);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn sounds_follow_what_happens_in_the_game() {
+        let (mut app, dir) = app("sound");
+        // Off, as in every other test: nothing is asked of it.
+        type_word(&mut app, "qqqqq");
+        assert!(app.sound.log.is_empty());
+        app.sound.on = true;
+        for _ in 0..5 {
+            app.on_key(key(KeyCode::Backspace));
+        }
+        type_word(&mut app, "qqqqq");
+        for _ in 0..5 {
+            app.on_key(key(KeyCode::Backspace));
+        }
+        type_word(&mut app, "slate");
+        app.on_key(key(KeyCode::Tab));
+        app.on_key(key(KeyCode::Esc));
+        // Looking at the hint again is not a new hint, and makes no sound.
+        app.on_key(key(KeyCode::Tab));
+        app.on_key(key(KeyCode::Esc));
+        type_word(&mut app, "crane");
+        let slate = game::evaluate(&game::word("SLATE").unwrap(), &game::word("CRANE").unwrap());
+        // Animations are off here, so the winning guess goes straight to the fanfare.
+        assert_eq!(app.sound.log, [Cue::Refused, Cue::Reveal(slate, 70), Cue::Hint, Cue::Won]);
+
+        // With animations on, the tiles are heard at the pace they flip, and the end of
+        // the game is heard once they have.
+        app.sound.log.clear();
+        app.animate = true;
+        app.act(Action::New);
+        type_word(&mut app, "crane");
+        assert_eq!(app.sound.log, [Cue::Reveal([game::Mark::Green; 5], FLIP.as_millis() as u32)]);
+        std::thread::sleep(FLIP * 5 + Duration::from_millis(30));
+        app.tick();
+        assert_eq!(app.sound.log.last(), Some(&Cue::Won));
+        app.act(Action::New);
+        app.act(Action::Surrender);
+        assert_eq!(app.sound.log.last(), Some(&Cue::Lost));
+
+        // Ctrl-A is the switch. The tests have no player, so it cannot be switched on,
+        // and says so; switching off always works, and is remembered.
+        app.act(Action::New);
+        app.on_key(ctrl('a'));
+        assert_eq!((app.sound.on, message(&app), app.stats.text("sound")), (false, "Sound: off", Some("0")));
+        app.on_key(ctrl('a'));
+        assert_eq!((app.sound.on, message(&app)), (false, "No sound player found"));
         let _ = std::fs::remove_dir_all(dir);
     }
 

@@ -1,15 +1,17 @@
 # funwordl
 
 A playful Wordle-style word game for the terminal, made for children. Guess the hidden
-five-letter word; ask for a hint when you are stuck; collect stars and the words you
-have learned.
+five-letter word, with sounds and confetti; collect stars and the words you have
+learned; switch to Easy for more guesses and hints.
 
 ![funwordl in a large terminal: a solved word, confetti falling, the title in eight colors](assets/screenshot.png)
 
-- **Easy to start.** A new player gets eight guesses and hints, and a word that is not
-  solved costs nothing. Three harder levels are one key away.
-- **Hints that teach.** The first hint is what the word means. After that, a letter at
-  a time.
+- **An Easy level.** Eight guesses, hints, and a word that is not solved costs
+  nothing. It is one key away from Normal, where the game starts.
+- **Hints that teach.** On Easy, the first hint is what the word means. After that, a
+  letter at a time.
+- **Sounds.** A note for every tile as a guess is turned over, higher the closer it
+  is, and a little tune for a solved word. One key switches them off.
 - **Stars and a collection.** A solved word earns up to three stars. Every word you
   meet is kept, with its meaning, to leaf through later.
 - **Confetti**, a bright theme to start with, and nine more to choose from.
@@ -22,8 +24,8 @@ have learned.
 <img src="assets/screenshot-small.png" width="480" alt="funwordl in an 80x24 terminal, showing a hint">
 
 funwordl is the playful sibling of [wordl](https://github.com/anwarahmed/wordl) and is
-built on the same rules and the same words. If you want the plain game, with six
-guesses and no hints, that is wordl. Both can be installed side by side; each keeps
+built on the same rules and the same words. If you want the plain game, with no
+sounds, stars or hints, that is wordl. Both can be installed side by side; each keeps
 its own stars and statistics.
 
 ## Install
@@ -131,18 +133,20 @@ The on-screen keyboard keeps track of what you know about each letter.
 | `Ctrl-W`    | your words                                     |
 | `Ctrl-T`    | next color theme                               |
 | `Ctrl-X`    | next level                                     |
+| `Ctrl-A`    | sound on or off                                |
 | `Ctrl-G`    | show the word and end the game                 |
 | `Ctrl-L`    | redraw the screen                              |
 | `Ctrl-Q`    | quit                                           |
 
 ### Levels
 
-`Ctrl-X` goes round four levels. The game starts on Easy and remembers the one you
+`Ctrl-X` goes round four levels. The game starts on Normal and remembers the one you
 choose.
 
 - **Easy** - eight guesses, and hints. A word you do not solve is not counted against
   you and does not end a run of solved words.
-- **Normal** - six guesses, no hints. Guesses must be real words.
+- **Normal** (where the game starts) - six guesses, no hints. Guesses must be real
+  words.
 - **Hard** - also: green letters must stay where they are and yellow letters must be
   used again.
 - **Ultra Hard** - also: a yellow letter must move to another spot, and a gray letter
@@ -161,8 +165,8 @@ window again later shows the hints you already have and takes no new one.
 
 ### Stars
 
-A solved word earns three stars. Each hint costs one, but a solved word always earns
-at least one. Your stars add up across every game, and the title line shows the total.
+A solved word earns three stars. On Easy each hint costs one, but a solved word always
+earns at least one. Your stars add up across every game, and the title line shows the total.
 
 ### Your words
 
@@ -181,7 +185,22 @@ hints included. It is not the same word as wordl's daily puzzle.
 
 `Ctrl-G` ends a game that is going nowhere. The game asks first, then shows the word
 on the board and its meaning. On Easy that costs nothing; on the other levels the
-game counts as not solved. `N` then starts the next word.
+game counts as played and not solved. `N` then starts the next word.
+
+### Sound
+
+The game makes a few sounds: a note for each tile as a guess is turned over (high for
+green, middle for yellow, low for gray), a short tune when a word is solved, and small
+ones for a hint, a refused guess and a word not solved.
+
+`Ctrl-A` switches sound off and on, and the game remembers it. `--no-sound`, or
+`FUNWORDL_NO_SOUND=1`, plays one game without.
+
+A terminal cannot play sounds itself, so the game hands them to the player your system
+already has: `afplay` on macOS; `pw-play`, `paplay` or `aplay` on Linux (PipeWire,
+PulseAudio or ALSA). If none is installed the game is silent and `Ctrl-A` says so.
+Over SSH the sound comes out of the machine the game runs on, not the one you are
+sitting at.
 
 ### Themes
 
@@ -198,8 +217,8 @@ game counts as not solved. `N` then starts the next word.
 ### Terminal size
 
 The game redraws itself when the window is resized and picks the largest board that
-fits. The smallest usable size is 39 columns by 14 rows on Easy and 39 by 12 on the
-other levels, whose boards are two rows shorter (a wide terminal can be shorter
+fits. The smallest usable size is 39 columns by 12 rows, and 39 by 14 on Easy, whose
+board is two rows taller (a wide terminal can be shorter
 still). Truecolor is used when the terminal announces it (`COLORTERM`), 256 colors
 otherwise.
 
@@ -218,15 +237,17 @@ funwordl --help | --version | --licenses
   -d, --daily               start with today's puzzle
   -t, --theme NAME          candy, sky, paper, daylight, midnight, neon, contrast, ocean,
                             ember or terminal
-      --easy                eight guesses, and hints with Tab (default)
-      --normal              six guesses; any dictionary word is a valid guess
+      --easy                eight guesses, and hints with Tab
+      --normal              six guesses; any dictionary word is a valid guess (default)
       --hard                green letters stay fixed, yellow letters must be reused
       --ultra               ultra hard: also, yellow letters must move to another
                             spot and gray letters may not be played again
       --no-animation        skip the tile animations and the confetti
+      --no-sound            play without sound this time
 ```
 
-The theme and level you choose in the game are remembered.
+The theme and level you choose in the game are remembered, and so is whether sound is
+on.
 
 ## Files
 

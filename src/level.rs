@@ -1,5 +1,5 @@
-//! The four levels. Easy is where the game starts: more guesses, and hints. The other
-//! three are wordl's difficulties, unchanged.
+//! The four levels. Easy has more guesses, and hints. The other three are wordl's
+//! difficulties, unchanged, and the game starts on the first of them, Normal.
 
 use crate::game::{Difficulty, Game, TRIES};
 
@@ -22,6 +22,8 @@ pub enum Level {
 
 impl Level {
     pub const ALL: [Self; 4] = [Self::Easy, Self::Normal, Self::Hard, Self::Ultra];
+    /// The level a new player starts on.
+    pub const DEFAULT: Self = Self::Normal;
 
     /// The number saved as `level` in the statistics file.
     pub fn index(self) -> usize {
