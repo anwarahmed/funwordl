@@ -1,0 +1,23 @@
+pkgbase = funwordl-bin
+	pkgdesc = A playful Wordle-style word game for the terminal, made for children
+	pkgver = @VERSION@
+	pkgrel = 1
+	url = https://github.com/anwarahmed/funwordl
+	arch = x86_64
+	arch = aarch64
+	license = MIT
+	license = LicenseRef-SCOWL
+	provides = funwordl
+	conflicts = funwordl
+	options = !strip
+	options = !debug
+	source = funwordl-@VERSION@-LICENSE::https://raw.githubusercontent.com/anwarahmed/funwordl/v@VERSION@/LICENSE
+	source = funwordl-@VERSION@-SCOWL-COPYRIGHT::https://raw.githubusercontent.com/anwarahmed/funwordl/v@VERSION@/SCOWL-COPYRIGHT
+	sha256sums = @SHA_LICENSE@
+	sha256sums = @SHA_SCOWL@
+	source_x86_64 = funwordl-@VERSION@-x86_64::https://github.com/anwarahmed/funwordl/releases/download/v@VERSION@/funwordl-x86_64-unknown-linux-musl
+	sha256sums_x86_64 = @SHA_X86_64@
+	source_aarch64 = funwordl-@VERSION@-aarch64::https://github.com/anwarahmed/funwordl/releases/download/v@VERSION@/funwordl-aarch64-unknown-linux-musl
+	sha256sums_aarch64 = @SHA_AARCH64@
+
+pkgname = funwordl-bin
