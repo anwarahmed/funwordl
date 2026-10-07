@@ -75,6 +75,9 @@ pub struct Theme {
     pub btnfg: Paint,
 }
 
+/// The theme a new player gets: a bright one.
+pub const DEFAULT: &str = "candy";
+
 pub const NAMES: [&str; 10] = ["midnight", "daylight", "neon", "contrast", "ocean", "ember", "paper", "sky", "candy", "terminal"];
 
 /// The nearest of the 6x6x6 color cube and the 24-step gray ramp.
@@ -183,6 +186,27 @@ impl Theme {
             if self.truecolor { Color::Rgb(r, g, b) } else { nearest_256(r, g, b) }
         };
         Some(Shades { light: color(|c| c * 1.35 + 20.0), dark: color(|c| c * 0.6), shadow: color(|c| c * 0.45) })
+    }
+}
+
+/// The colors of the title's letters and of the confetti: the same cheerful eight in
+/// every theme, as red, green and blue.
+const PARTY: [(u8, u8, u8); 8] = [(226, 68, 92), (238, 125, 38), (214, 158, 18), (58, 170, 95), (26, 166, 178), (60, 120, 230), (140, 90, 220), (226, 88, 168)];
+
+impl Theme {
+    /// The party colors and the color of a letter on them. The "terminal" theme has only
+    /// the terminal's own palette, so there they are its six plain colors.
+    pub fn party(&self) -> ([Paint; 8], Paint) {
+        if self.name == "terminal" {
+            let same = |c: Color| Paint { fg: c, bg: c, rgb: None };
+            let six = [Color::Red, Color::Yellow, Color::Green, Color::Cyan, Color::Blue, Color::Magenta];
+            return (std::array::from_fn(|i| same(six[i % 6])), same(Color::Black));
+        }
+        let paint = |(r, g, b): (u8, u8, u8)| {
+            let color = if self.truecolor { Color::Rgb(r, g, b) } else { nearest_256(r, g, b) };
+            Paint { fg: color, bg: color, rgb: Some((r, g, b)) }
+        };
+        (PARTY.map(paint), paint((255, 255, 255)))
     }
 }
 

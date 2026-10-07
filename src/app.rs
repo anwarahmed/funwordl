@@ -7,9 +7,12 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 
-use crate::game::{self, DAILY_BASE, Difficulty, Game, Mode, Status, Word};
+use std::collections::BTreeMap;
+
+use crate::game::{self, Game, Mark, Mode, Status, Word};
 use crate::layout;
-use crate::store::Stats;
+use crate::level::{self, Level, MAX_HINTS};
+use crate::store::{self, Stats};
 use crate::theme::{self, Theme};
 use crate::{ui, words};
 
@@ -20,16 +23,33 @@ pub const SHAKE_STEP: Duration = Duration::from_millis(35);
 pub const SHAKE_STEPS: u32 = 7;
 /// One step of the flash that runs along a winning row.
 pub const FLASH_STEP: Duration = Duration::from_millis(70);
+/// How long confetti falls after a word is solved.
+pub const CONFETTI: Duration = Duration::from_millis(2600);
 /// The pause between the end of a game and the statistics opening by themselves.
 const STATS_DELAY: Duration = Duration::from_millis(1300);
+
+/// The day number (days since 1970-01-01, local time) of the day before puzzle #1.
+pub const DAILY_BASE: i64 = 20732;
+
+/// The daily word. Not wordl's word for the day: someone who plays both games would
+/// otherwise be handed the answer by the first. Changing the answer list changes it.
+pub fn daily_answer(day: i64) -> Word {
+    let list = words::answers();
+    let index = (day * 6151 + 51_287).rem_euclid(list.len() as i64) as usize;
+    game::word(list[index]).expect("answers are five letters")
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Modal {
     None,
     Help,
     Stats,
-    /// "Give up?", asked before a game is ended on purpose.
+    /// "Show the word?", asked before a game is ended on purpose.
     GiveUp,
+    /// The hints taken for this word.
+    Hint,
+    /// The words met so far, one at a time, each with its meaning.
+    Words,
 }
 
 /// A key of the on-screen keyboard.
@@ -50,6 +70,13 @@ pub enum Action {
     Stats,
     Theme,
     Difficulty,
+    /// Show the hints; the first time, and from inside the hint dialog, take one more.
+    Hint,
+    /// Open the collection of words met so far.
+    Words,
+    /// Turn to the word before or after in the collection.
+    CardPrev,
+    CardNext,
     /// Ask whether to give up.
     GiveUp,
     /// Give up, confirmed.
@@ -80,10 +107,10 @@ pub struct Message {
 pub struct Options {
     pub mode: Mode,
     pub theme: Option<String>,
-    pub difficulty: Option<Difficulty>,
+    pub level: Option<Level>,
     pub animate: bool,
     pub truecolor: bool,
-    /// Fixes the practice word, for tests (`WORDL_DEBUG_ANSWER`).
+    /// Fixes the practice word, for tests (`FUNWORDL_DEBUG_ANSWER`).
     pub debug_answer: Option<Word>,
 }
 
@@ -92,8 +119,17 @@ pub struct App {
     pub stats: Stats,
     pub theme: Theme,
     truecolor: bool,
-    /// The difficulty new games start with. A game under way keeps its own.
-    pub chosen: Difficulty,
+    /// The level new games start with. A game under way keeps its own.
+    pub chosen: Level,
+    /// Hints taken for this word: the first is its meaning, each one after it a letter.
+    pub hints: usize,
+    /// The spots (0 to 4) whose letters the hints have given away.
+    pub hint_letters: Vec<usize>,
+    /// Every word met so far with the most stars it earned ("0" for one not solved),
+    /// as kept in the `learned` file. Sorted by word.
+    pub learned: BTreeMap<String, String>,
+    /// Which word of the collection is on show.
+    pub card: usize,
     pub modal: Modal,
     pub message: Option<Message>,
     /// The end-of-game message returns once a passing note ("Result copied") is gone.
@@ -103,6 +139,8 @@ pub struct App {
     pub reveal: Option<(usize, Instant)>,
     pub shake: Option<Instant>,
     pub celebrate: Option<(usize, Instant)>,
+    /// When the confetti started falling.
+    pub confetti: Option<Instant>,
     animate: bool,
     /// The time of the frame being drawn; animations are a function of it.
     pub now: Instant,
@@ -123,15 +161,22 @@ pub fn today() -> i64 {
 impl App {
     pub fn new(mut stats: Stats, options: Options) -> Self {
         stats.expire_daily_streak(today());
-        let chosen = options.difficulty.unwrap_or_else(|| stats.difficulty());
-        let theme = theme::theme(options.theme.as_deref().unwrap_or_else(|| stats.theme()), options.truecolor);
+        // Easy unless another level was chosen: `level` is absent from a new file.
+        let chosen = options.level.unwrap_or_else(|| Level::from_index(stats.num("level").clamp(0, 3) as usize));
+        let saved_theme = stats.text("theme").filter(|name| theme::NAMES.contains(name)).unwrap_or(theme::DEFAULT);
+        let theme = theme::theme(options.theme.as_deref().unwrap_or(saved_theme), options.truecolor);
+        let learned = store::read_pairs(&stats.dir().join("learned"));
         let seed = SystemTime::now().duration_since(UNIX_EPOCH).map_or(1, |d| d.as_nanos() as u64) ^ ((std::process::id() as u64) << 32) | 1;
         let mut app = Self {
-            game: Game::new(Mode::Practice, 0, *b"WORDL", chosen),
+            game: Game::new(Mode::Practice, 0, *b"WORDL", chosen.difficulty()),
             stats,
             theme,
             truecolor: options.truecolor,
             chosen,
+            hints: 0,
+            hint_letters: Vec::new(),
+            learned,
+            card: 0,
             modal: Modal::None,
             message: None,
             restore_end: false,
@@ -139,6 +184,7 @@ impl App {
             reveal: None,
             shake: None,
             celebrate: None,
+            confetti: None,
             animate: options.animate,
             now: Instant::now(),
             quit: false,
@@ -155,14 +201,101 @@ impl App {
     /// where it was left, since there is only one word a day.
     pub fn new_game(&mut self, mode: Mode) {
         let day = today();
+        let level = self.chosen;
+        let fresh = |answer| Game::new(mode, day, answer, level.difficulty()).with_tries(level.tries());
+        (self.hints, self.hint_letters) = (0, Vec::new());
         self.game = match mode {
-            Mode::Daily => self.stats.load_daily(day).unwrap_or_else(|| Game::new(mode, day, game::daily_answer(day), self.chosen)),
-            Mode::Practice => Game::new(mode, day, self.debug_answer.unwrap_or_else(|| self.random_answer()), self.chosen),
+            Mode::Daily => match self.stats.load_daily(day) {
+                Some(game) => {
+                    self.load_hints(day);
+                    game
+                }
+                None => fresh(daily_answer(day)),
+            },
+            Mode::Practice => fresh(self.debug_answer.unwrap_or_else(|| self.random_answer())),
         };
         self.modal = Modal::None;
         self.pending_stats = None;
-        (self.reveal, self.shake, self.celebrate) = (None, None, None);
+        (self.reveal, self.shake, self.celebrate, self.confetti) = (None, None, None, None);
         self.end_message();
+    }
+
+    /// The hints taken for the daily puzzle are kept with the statistics, as
+    /// `daily_hints=<day>,<hints>,<spot>,...`, so that leaving and coming back does not
+    /// hand the stars back.
+    fn save_hints(&mut self) {
+        if self.game.mode != Mode::Daily {
+            return;
+        }
+        let mut parts = vec![self.game.day.to_string(), self.hints.to_string()];
+        parts.extend(self.hint_letters.iter().map(usize::to_string));
+        self.stats.set("daily_hints", parts.join(","));
+        self.stats.save();
+    }
+
+    fn load_hints(&mut self, day: i64) {
+        let saved: Vec<i64> = self.stats.text("daily_hints").unwrap_or_default().split(',').filter_map(|v| v.parse().ok()).collect();
+        if let [saved_day, hints, spots @ ..] = saved.as_slice()
+            && *saved_day == day
+        {
+            self.hints = (*hints).clamp(0, MAX_HINTS as i64) as usize;
+            self.hint_letters = spots.iter().filter(|&&spot| (0..5).contains(&spot)).map(|&spot| spot as usize).take(MAX_HINTS - 1).collect();
+        }
+    }
+
+    /// The spot the next hint would give away: one whose letter is neither known from a
+    /// green tile nor already given. Spread out, not left to right.
+    fn next_hint_spot(&self) -> Option<usize> {
+        let green = |spot: usize| self.game.marks.iter().any(|marks| marks[spot] == Mark::Green);
+        [0, 2, 4, 1, 3].into_iter().find(|&spot| !self.hint_letters.contains(&spot) && !green(spot))
+    }
+
+    /// Whether another hint can be had.
+    pub fn more_hints(&self) -> bool {
+        self.game.playing() && Level::of(&self.game) == Level::Easy && self.hints < MAX_HINTS && (self.hints == 0 || self.next_hint_spot().is_some())
+    }
+
+    /// The first hint is what the word means; each one after that gives a letter.
+    fn take_hint(&mut self) {
+        if !self.more_hints() {
+            return;
+        }
+        if self.hints > 0
+            && let Some(spot) = self.next_hint_spot()
+        {
+            self.hint_letters.push(spot);
+        }
+        self.hints += 1;
+        self.save_hints();
+    }
+
+    /// The stars this word is worth if it is solved now.
+    pub fn stars(&self) -> usize {
+        level::stars(self.hints)
+    }
+
+    /// The words of the collection, in order.
+    pub fn cards(&self) -> Vec<(&str, usize)> {
+        self.learned.iter().map(|(word, stars)| (word.as_str(), stars.parse().unwrap_or(0).min(3))).collect()
+    }
+
+    /// Counts a finished game. On Easy a word that was not solved costs nothing: it is
+    /// not counted as played and does not end a run of solved words. Either way the
+    /// word goes into the collection, to be looked at again.
+    fn finish(&mut self) {
+        let won = self.game.status == Status::Won;
+        if won || Level::of(&self.game) != Level::Easy {
+            self.stats.record(&self.game);
+        }
+        let stars = if won { self.stars() } else { 0 };
+        if won {
+            self.stats.set("stars", self.stats.num("stars") + stars as i64);
+            self.stats.save();
+        }
+        let word = game::text(&self.game.answer).to_lowercase();
+        let best = self.learned.get(&word).and_then(|v| v.parse().ok()).unwrap_or(0).max(stars);
+        self.learned.insert(word, best.to_string());
+        store::write_pairs(&self.stats.dir().join("learned"), &self.learned);
     }
 
     fn random_answer(&mut self) -> Word {
@@ -180,13 +313,13 @@ impl App {
     }
 
     fn small(&self) -> bool {
-        layout::layout(self.size.0, self.size.1).is_none()
+        layout::layout(self.size.0, self.size.1, self.game.tries).is_none()
     }
 
     /// Whether an animation is running. While one is, the event loop draws frames and
     /// leaves keys in the queue, so typing ahead is neither lost nor acted on early.
     pub fn animating(&self) -> bool {
-        self.reveal.is_some() || self.shake.is_some() || self.celebrate.is_some()
+        self.reveal.is_some() || self.shake.is_some() || self.celebrate.is_some() || self.confetti.is_some()
     }
 
     /// When the loop has to wake up without a key: a message expiring, or the
@@ -208,7 +341,11 @@ impl App {
         }
         if self.celebrate.is_some_and(|(_, start)| self.now >= start + FLASH_STEP * 6) {
             self.celebrate = None;
+            self.confetti = Some(self.now);
             self.after_guess();
+        }
+        if self.confetti.is_some_and(|start| self.now >= start + CONFETTI) {
+            self.confetti = None;
         }
         if self.shake.is_some_and(|start| self.now >= start + SHAKE_STEP * SHAKE_STEPS) {
             self.shake = None;
@@ -240,11 +377,13 @@ impl App {
 
     /// The lasting message of a finished game, or none while it is being played.
     fn end_message(&mut self) {
-        const PRAISE: [&str; 6] = ["Genius", "Magnificent", "Impressive", "Splendid", "Great", "Phew"];
-        let tries = self.game.guesses.len();
+        const PRAISE: [&str; 8] = ["Genius", "Magnificent", "Amazing", "Splendid", "Great", "Nice", "Well done", "Phew"];
+        let (tries, allowed) = (self.game.guesses.len(), self.game.tries);
+        let answer = game::text(&self.game.answer);
         self.message = match self.game.status {
-            Status::Won => Some((format!("{}! Solved in {tries}/6", PRAISE[tries.clamp(1, 6) - 1]), MessageKind::Win)),
-            Status::Lost => Some((format!("The word was {}", game::text(&self.game.answer)), MessageKind::Error)),
+            Status::Won => Some((format!("{}! Solved in {tries}/{allowed}", PRAISE[tries.clamp(1, 8) - 1]), MessageKind::Win)),
+            Status::Lost if self.game.gave_up => Some((format!("The word was {answer}"), MessageKind::Error)),
+            Status::Lost => Some((format!("So close! It was {answer}"), MessageKind::Error)),
             Status::Playing => None,
         }
         .map(|(text, kind)| Message { text, kind, until: None });
@@ -255,7 +394,8 @@ impl App {
     fn after_guess(&mut self) {
         if !self.game.playing() {
             self.end_message();
-            self.pending_stats = Some(Instant::now() + STATS_DELAY);
+            // The statistics wait for the confetti to land.
+            self.pending_stats = Some(Instant::now() + if self.confetti.is_some() { CONFETTI } else { STATS_DELAY });
         }
     }
 
@@ -285,10 +425,10 @@ impl App {
             return self.act(Action::Stats);
         }
         let Some(guess) = game::word(&String::from_utf8_lossy(&self.game.cur)) else {
-            return self.refuse("Not enough letters", 2);
+            return self.refuse("Type 5 letters first", 2);
         };
         if !words::is_word(&game::text(&guess)) {
-            return self.refuse("Not in word list", 2);
+            return self.refuse("I don't know that word", 2);
         }
         if let Err(why) = game::check_clues(self.game.difficulty, &self.game.guesses, &self.game.marks, &guess) {
             return self.refuse(why, 3);
@@ -298,7 +438,7 @@ impl App {
         self.game.add_guess(guess);
         self.stats.save_daily(&self.game);
         if !self.game.playing() {
-            self.stats.record(&self.game);
+            self.finish();
         }
         if self.animate {
             self.reveal = Some((self.game.guesses.len() - 1, Instant::now()));
@@ -311,12 +451,19 @@ impl App {
     pub fn share_text(&self) -> String {
         let game = &self.game;
         let (green, yellow) = if self.theme.name == "contrast" { ("🟧", "🟦") } else { ("🟩", "🟨") };
-        let score = if game.status == Status::Won { game.guesses.len().to_string() } else { "X".to_string() };
+        let won = game.status == Status::Won;
+        let score = if won { game.guesses.len().to_string() } else { "X".to_string() };
         let mut text = match game.mode {
-            Mode::Daily => format!("Wordl #{} {score}/6", self.daily_number()),
-            Mode::Practice => format!("Wordl practice {score}/6"),
+            Mode::Daily => format!("Funwordl #{} {score}/{}", self.daily_number(), game.tries),
+            Mode::Practice => format!("Funwordl practice {score}/{}", game.tries),
         };
-        text.push_str(&"*".repeat(game.difficulty.index()));
+        if won {
+            text.push_str(&format!(" {}", "★".repeat(self.stars())));
+        }
+        let level = Level::of(game);
+        if level != Level::Easy {
+            text.push_str(&format!(" ({})", level.name()));
+        }
         text.push('\n');
         for marks in &game.marks {
             text.push('\n');
@@ -353,20 +500,50 @@ impl App {
             }
             Action::Difficulty => {
                 self.chosen = self.chosen.next();
-                self.stats.set("hard", self.chosen.index());
+                self.stats.set("level", self.chosen.index());
                 self.stats.save();
-                if self.small() || !self.game.playing() {
+                if !self.game.playing() {
                     return;
                 }
                 // A game under way can be made easier, but not harder: its earlier
-                // guesses were not held to the stricter rules.
-                if self.chosen <= self.game.difficulty || self.game.guesses.is_empty() {
-                    self.game.difficulty = self.chosen;
+                // guesses were not held to the stricter rules, and hints may have been
+                // taken.
+                let untouched = self.game.guesses.is_empty() && self.hints == 0;
+                if self.chosen <= Level::of(&self.game) || untouched {
+                    self.chosen.apply(&mut self.game);
                     self.stats.save_daily(&self.game);
-                    self.toast(format!("Difficulty: {}", self.chosen.name()), MessageKind::Plain, 2);
+                    self.toast(format!("Level: {}", self.chosen.name()), MessageKind::Plain, 2);
                 } else {
                     self.toast(format!("{} starts next game", self.chosen.name()), MessageKind::Plain, 3);
                 }
+            }
+            Action::Hint => {
+                if !self.game.playing() || self.small() {
+                    return;
+                }
+                if Level::of(&self.game) != Level::Easy {
+                    return self.toast("Hints are for Easy (^X)", MessageKind::Plain, 3);
+                }
+                // Opening the dialog again only shows what was already given; asking
+                // from inside it is what takes another hint.
+                if self.hints == 0 || self.modal == Modal::Hint {
+                    self.take_hint();
+                }
+                (self.modal, self.pending_stats) = (Modal::Hint, None);
+            }
+            Action::Words => {
+                // After a game the collection opens at the word just met.
+                let word = game::text(&self.game.answer).to_lowercase();
+                if !self.game.playing()
+                    && let Some(at) = self.learned.keys().position(|w| *w == word)
+                {
+                    self.card = at;
+                }
+                (self.modal, self.pending_stats) = (Modal::Words, None);
+            }
+            Action::CardPrev | Action::CardNext => {
+                let count = self.learned.len().max(1);
+                self.card = (self.card.min(count - 1) + if action == Action::CardNext { 1 } else { count - 1 }) % count;
             }
             // Asks first: one stray key must not end a game.
             Action::GiveUp => {
@@ -380,7 +557,7 @@ impl App {
                     self.modal = Modal::None;
                     self.game.give_up();
                     self.stats.save_daily(&self.game);
-                    self.stats.record(&self.game);
+                    self.finish();
                     self.after_guess();
                 }
             }
@@ -418,15 +595,21 @@ impl App {
             // The result of a game stays up until it is answered with N, C or Esc. Enter
             // and letters are pressed once too often at the end of a game, and must not
             // take the result away before it has been read.
+            (Modal::Stats, KeyCode::Char('w' | 'W')) => return self.act(Action::Words),
             (Modal::Stats, KeyCode::Char('n' | 'N')) if !playing => return self.act(Action::New),
             (Modal::Stats, KeyCode::Char('c' | 'C')) if !playing => return self.act(Action::Copy),
             (Modal::Stats, KeyCode::Esc) if !playing => return self.act(Action::Close),
             (Modal::Stats, _) if !playing => return,
             (Modal::GiveUp, KeyCode::Enter | KeyCode::Char('y' | 'Y')) => return self.act(Action::Surrender),
+            (Modal::Hint, KeyCode::Tab) => return self.act(Action::Hint),
+            (Modal::Words, KeyCode::Left | KeyCode::Up) => return self.act(Action::CardPrev),
+            (Modal::Words, KeyCode::Right | KeyCode::Down | KeyCode::Char(' ')) => return self.act(Action::CardNext),
             _ => return self.act(Action::Close),
         }
-        // Every letter types, so commands are Ctrl keys or `?`.
+        // Every letter types, so commands are Ctrl keys, Tab or `?`.
         match key.code {
+            KeyCode::Tab => self.act(Action::Hint),
+            KeyCode::Char('w') if ctrl => self.act(Action::Words),
             KeyCode::Char('n') if ctrl => self.act(Action::New),
             KeyCode::Char('d') if ctrl => self.act(Action::Daily),
             KeyCode::Char('s') if ctrl => self.act(Action::Stats),
@@ -491,11 +674,20 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
-    fn app(name: &str) -> (App, PathBuf) {
-        let dir = std::env::temp_dir().join(format!("wordl-test-{}-app-{name}", std::process::id()));
+    fn app_at(name: &str, level: Option<Level>) -> (App, PathBuf) {
+        let dir = std::env::temp_dir().join(format!("funwordl-test-{}-app-{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        let options = Options { mode: Mode::Practice, theme: None, difficulty: None, animate: false, truecolor: true, debug_answer: game::word("CRANE") };
-        (App::new(Stats::load(dir.clone()), options), dir)
+        (reopen(&dir, level), dir)
+    }
+
+    /// The game started again on the same saved files.
+    fn reopen(dir: &std::path::Path, level: Option<Level>) -> App {
+        let options = Options { mode: Mode::Practice, theme: None, level, animate: false, truecolor: true, debug_answer: game::word("CRANE") };
+        App::new(Stats::load(dir.to_path_buf()), options)
+    }
+
+    fn app(name: &str) -> (App, PathBuf) {
+        app_at(name, None)
     }
 
     fn key(code: KeyCode) -> KeyEvent {
@@ -520,12 +712,13 @@ mod tests {
     #[test]
     fn a_game_is_typed_refused_and_won() {
         let (mut app, dir) = app("win");
+        assert_eq!((app.chosen, app.game.tries, app.theme.name), (Level::Easy, 8, theme::DEFAULT));
         type_word(&mut app, "sla");
-        assert_eq!(message(&app), "Not enough letters");
+        assert_eq!(message(&app), "Type 5 letters first");
         app.on_key(key(KeyCode::Backspace));
         assert_eq!(app.game.cur, b"SL");
         type_word(&mut app, "qqq");
-        assert_eq!(message(&app), "Not in word list");
+        assert_eq!(message(&app), "I don't know that word");
         for _ in 0..5 {
             app.on_key(key(KeyCode::Backspace));
         }
@@ -533,13 +726,14 @@ mod tests {
         assert_eq!((app.game.guesses.len(), message(&app)), (1, ""));
         type_word(&mut app, "CRANE");
         assert_eq!(app.game.status, Status::Won);
-        assert_eq!(message(&app), "Magnificent! Solved in 2/6");
-        assert_eq!((app.stats.of(Mode::Practice, "wins"), app.stats.of(Mode::Practice, "d2")), (1, 1));
+        assert_eq!(message(&app), "Magnificent! Solved in 2/8");
+        assert_eq!((app.stats.of(Mode::Practice, "wins"), app.stats.of(Mode::Practice, "d2"), app.stats.num("stars")), (1, 1, 3));
+        assert_eq!(app.cards(), [("crane", 3)]);
         // Enter on a finished game opens the statistics, and more of it changes nothing:
-        // the result stays up until it is answered with N, C or Esc.
+        // the result stays up until it is answered with N, C, W or Esc.
         app.on_key(key(KeyCode::Enter));
         assert_eq!(app.modal, Modal::Stats);
-        for stray in [KeyCode::Enter, KeyCode::Enter, KeyCode::Char('e'), KeyCode::Char(' '), KeyCode::Backspace, KeyCode::Char('?')] {
+        for stray in [KeyCode::Enter, KeyCode::Enter, KeyCode::Char('e'), KeyCode::Char(' '), KeyCode::Backspace, KeyCode::Char('?'), KeyCode::Tab] {
             app.on_key(key(stray));
         }
         app.on_mouse(MouseEvent { kind: MouseEventKind::Down(MouseButton::Left), column: 0, row: 0, modifiers: KeyModifiers::NONE });
@@ -559,38 +753,109 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
+    const WRONG: [&str; 8] = ["slate", "count", "world", "house", "mound", "plant", "brick", "jumpy"];
+
     #[test]
-    fn six_wrong_guesses_lose() {
-        let (mut app, dir) = app("lose");
-        for word in ["slate", "count", "world", "house", "mound", "plant"] {
+    fn an_easy_game_has_eight_guesses_and_losing_it_costs_nothing() {
+        let (mut app, dir) = app("easy");
+        type_word(&mut app, "crane");
+        app.on_key(key(KeyCode::Enter));
+        app.on_key(key(KeyCode::Char('n')));
+        assert_eq!((app.stats.of(Mode::Practice, "played"), app.stats.of(Mode::Practice, "streak")), (1, 1));
+        for (i, word) in WRONG.iter().enumerate() {
+            assert_eq!(app.game.status, Status::Playing, "before guess {}", i + 1);
             type_word(&mut app, word);
         }
-        assert_eq!((app.game.status, message(&app)), (Status::Lost, "The word was CRANE"));
-        assert_eq!((app.stats.of(Mode::Practice, "played"), app.stats.of(Mode::Practice, "wins")), (1, 0));
-        assert_eq!(app.share_text(), "Wordl practice X/6\n\n⬛⬛🟩⬛🟩\n🟩⬛⬛🟩⬛\n⬛⬛🟨⬛⬛\n⬛⬛⬛⬛🟩\n⬛⬛⬛🟩⬛\n⬛⬛🟩🟩⬛\n");
+        assert_eq!((app.game.status, message(&app)), (Status::Lost, "So close! It was CRANE"));
+        // Not counted, and the run of solved words goes on.
+        assert_eq!((app.stats.of(Mode::Practice, "played"), app.stats.of(Mode::Practice, "streak"), app.stats.num("stars")), (1, 1, 3));
+        // The stars a word earned are kept when it is met again and not solved.
+        assert_eq!(app.cards(), [("crane", 3)]);
+        assert!(app.share_text().starts_with("Funwordl practice X/8\n\n⬛⬛🟩⬛🟩\n"), "{}", app.share_text());
         let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
-    fn difficulty_can_ease_mid_game_but_not_tighten() {
-        let (mut app, dir) = app("difficulty");
+    fn the_other_levels_play_as_wordl_does() {
+        let (mut app, dir) = app_at("normal", Some(Level::Normal));
+        type_word(&mut app, "crane");
+        app.on_key(key(KeyCode::Enter));
+        assert!(app.share_text().starts_with("Funwordl practice 1/6 ★★★ (Normal)\n"), "{}", app.share_text());
+        app.on_key(key(KeyCode::Char('n')));
+        for word in &WRONG[..6] {
+            type_word(&mut app, word);
+        }
+        assert_eq!(app.game.status, Status::Lost);
+        // Counted as played, and the run is over.
+        assert_eq!((app.stats.of(Mode::Practice, "played"), app.stats.of(Mode::Practice, "wins"), app.stats.of(Mode::Practice, "streak")), (2, 1, 0));
+        // No hints here.
+        app.act(Action::New);
+        app.on_key(key(KeyCode::Tab));
+        assert_eq!((app.modal, app.hints, message(&app)), (Modal::None, 0, "Hints are for Easy (^X)"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn hints_give_the_meaning_then_letters_and_cost_stars() {
+        let (mut app, dir) = app("hints");
+        type_word(&mut app, "comet"); // C is green: no hint will spend itself on it
+        app.on_key(key(KeyCode::Tab));
+        assert_eq!((app.modal, app.hints, app.hint_letters.len(), app.stars()), (Modal::Hint, 1, 0, 2));
+        // Closing and opening again shows the same hint and takes no new one.
+        app.on_key(key(KeyCode::Esc));
+        app.on_key(key(KeyCode::Tab));
+        assert_eq!((app.modal, app.hints), (Modal::Hint, 1));
+        // Tab inside the dialog asks for more: letters, spread out, skipping the green.
+        app.on_key(key(KeyCode::Tab));
+        assert_eq!((app.hints, app.hint_letters.clone(), app.stars()), (2, vec![2], 1));
+        app.on_key(key(KeyCode::Tab));
+        app.on_key(key(KeyCode::Tab));
+        assert_eq!((app.hints, app.hint_letters.clone(), app.more_hints()), (4, vec![2, 4, 1], false));
+        app.on_key(key(KeyCode::Tab));
+        assert_eq!((app.hints, app.stars()), (MAX_HINTS, 1));
+        app.on_key(key(KeyCode::Char('x')));
+        assert_eq!((app.modal, app.game.cur.len()), (Modal::None, 0));
+        type_word(&mut app, "crane");
+        assert_eq!((app.stats.num("stars"), app.cards()), (1, vec![("crane", 1)]));
+        assert!(app.share_text().starts_with("Funwordl practice 2/8 ★\n"));
+        // The next word starts with no hints taken.
+        app.act(Action::New);
+        assert_eq!((app.hints, app.hint_letters.len(), app.stars()), (0, 0, 3));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn the_level_can_ease_mid_game_but_not_tighten() {
+        let (mut app, dir) = app("level");
+        // Nothing done yet: any level takes effect at once.
         app.on_key(ctrl('x'));
-        assert_eq!((app.chosen, app.game.difficulty, message(&app)), (Difficulty::Hard, Difficulty::Hard, "Difficulty: Hard"));
+        app.on_key(ctrl('x'));
+        assert_eq!((app.chosen, Level::of(&app.game), app.game.tries, message(&app)), (Level::Hard, Level::Hard, 6, "Level: Hard"));
         type_word(&mut app, "slate");
         type_word(&mut app, "count");
         assert_eq!(message(&app), "3rd letter must be A");
         app.on_key(ctrl('x'));
-        assert_eq!((app.chosen, app.game.difficulty, message(&app)), (Difficulty::Ultra, Difficulty::Hard, "Ultra Hard starts next game"));
+        assert_eq!((app.chosen, Level::of(&app.game), message(&app)), (Level::Ultra, Level::Hard, "Ultra Hard starts next game"));
+        // Round to Easy: easier, so at once, with its two extra guesses.
         app.on_key(ctrl('x'));
-        assert_eq!((app.chosen, app.game.difficulty), (Difficulty::Normal, Difficulty::Normal));
+        assert_eq!((app.chosen, Level::of(&app.game), app.game.tries), (Level::Easy, Level::Easy, 8));
+        app.on_key(ctrl('x'));
+        assert_eq!((app.chosen, Level::of(&app.game), message(&app)), (Level::Normal, Level::Easy, "Normal starts next game"));
         // The choice is remembered.
-        assert_eq!(Stats::load(dir.clone()).difficulty(), Difficulty::Normal);
+        assert_eq!(reopen(&dir, None).chosen, Level::Normal);
+        // A hint counts as having started, too.
+        let (mut app, dir2) = app_at("level-hint", None);
+        app.on_key(key(KeyCode::Tab));
+        app.on_key(key(KeyCode::Esc));
+        app.on_key(ctrl('x'));
+        assert_eq!((app.chosen, Level::of(&app.game)), (Level::Normal, Level::Easy));
         let _ = std::fs::remove_dir_all(dir);
+        let _ = std::fs::remove_dir_all(dir2);
     }
 
     #[test]
-    fn giving_up_asks_first_and_counts_as_a_loss() {
-        let (mut app, dir) = app("giveup");
+    fn giving_up_asks_first_and_shows_the_word() {
+        let (mut app, dir) = app_at("giveup", Some(Level::Normal));
         type_word(&mut app, "slate");
         app.on_key(ctrl('g'));
         assert_eq!((app.modal, app.game.status), (Modal::GiveUp, Status::Playing));
@@ -601,6 +866,8 @@ mod tests {
         assert_eq!((app.modal, app.game.status, app.game.gave_up), (Modal::None, Status::Lost, true));
         assert_eq!(message(&app), "The word was CRANE");
         assert_eq!((app.stats.of(Mode::Practice, "played"), app.stats.of(Mode::Practice, "wins")), (1, 0));
+        // The word is kept to look at again, with no stars.
+        assert_eq!(app.cards(), [("crane", 0)]);
         // Not twice.
         app.act(Action::Surrender);
         assert_eq!(app.stats.of(Mode::Practice, "played"), 1);
@@ -610,28 +877,75 @@ mod tests {
     }
 
     #[test]
-    fn a_given_up_daily_puzzle_stays_given_up() {
+    fn the_daily_puzzle_keeps_its_guesses_hints_and_level() {
         let (mut app, dir) = app("daily");
         app.on_key(ctrl('d'));
-        assert_eq!(app.game.mode, Mode::Daily);
+        assert_eq!((app.game.mode, app.game.tries), (Mode::Daily, 8));
+        assert_eq!(app.daily_number(), today() - DAILY_BASE);
         // Whatever today's word is, this is a valid first guess or the answer itself.
         type_word(&mut app, "slate");
         if app.game.playing() {
+            app.on_key(key(KeyCode::Tab));
+            app.on_key(key(KeyCode::Tab));
+            let letters = app.hint_letters.clone();
+            assert_eq!((app.hints, letters.len()), (2, 1));
+            // Another start of the game, even one that asks for a harder level.
+            let mut app = reopen(&dir, Some(Level::Hard));
+            app.on_key(ctrl('d'));
+            assert_eq!((app.game.guesses.len(), app.game.tries, Level::of(&app.game)), (1, 8, Level::Easy));
+            assert_eq!((app.hints, app.hint_letters.clone()), (2, letters));
             app.act(Action::Surrender);
             app.on_key(ctrl('n'));
             app.on_key(ctrl('d'));
             assert_eq!((app.game.status, app.game.gave_up, app.game.guesses.len()), (Status::Lost, true, 1));
-            assert_eq!(app.stats.of(Mode::Daily, "played"), 1);
         }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn the_daily_word_is_fixed_for_a_day_and_is_not_wordls() {
+        assert_eq!(daily_answer(20733), daily_answer(20733));
+        assert!(words::is_word(&game::text(&daily_answer(-5))));
+        let same = (20733..20833).filter(|&day| daily_answer(day) == game::daily_answer(day)).count();
+        assert!(same <= 2, "{same} of 100 days share wordl's word");
+    }
+
+    #[test]
+    fn the_collection_is_kept_and_leafed_through() {
+        let (mut app, dir) = app("words");
+        app.on_key(ctrl('w'));
+        assert_eq!((app.modal, app.cards().len()), (Modal::Words, 0));
+        // Turning pages of an empty collection does nothing, and any other key closes it.
+        app.on_key(key(KeyCode::Right));
+        app.on_key(key(KeyCode::Char('q')));
+        assert_eq!((app.modal, app.card), (Modal::None, 0));
+        for word in ["CRANE", "ABOUT", "ZEBRA"] {
+            app.debug_answer = game::word(word);
+            app.act(Action::New);
+            type_word(&mut app, word);
+        }
+        assert_eq!(app.cards(), [("about", 3), ("crane", 3), ("zebra", 3)]);
+        // After a game it opens at the word just met; the arrows go round.
+        app.on_key(key(KeyCode::Enter));
+        app.on_key(key(KeyCode::Char('w')));
+        assert_eq!((app.modal, app.card), (Modal::Words, 2));
+        app.on_key(key(KeyCode::Right));
+        assert_eq!(app.card, 0);
+        app.on_key(key(KeyCode::Left));
+        app.on_key(key(KeyCode::Left));
+        assert_eq!((app.modal, app.card), (Modal::Words, 1));
+        // Read back by the next start of the game.
+        assert_eq!(reopen(&dir, None).cards().len(), 3);
         let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
     fn themes_cycle_and_are_remembered() {
         let (mut app, dir) = app("theme");
+        let next = theme::next_name(theme::DEFAULT);
         app.on_key(ctrl('t'));
-        assert_eq!((app.theme.name, message(&app)), ("daylight", "Theme: daylight"));
-        assert_eq!(Stats::load(dir.clone()).theme(), "daylight");
+        assert_eq!((app.theme.name, message(&app)), (next, format!("Theme: {next}").as_str()));
+        assert_eq!(reopen(&dir, None).theme.name, next);
         let _ = std::fs::remove_dir_all(dir);
     }
 

@@ -1,12 +1,9 @@
 mod app;
 mod font;
-mod game;
 mod layout;
-mod store;
+mod level;
 mod theme;
 mod ui;
-mod update;
-mod words;
 
 use std::cell::RefCell;
 use std::io::{self, IsTerminal, Write, stdout};
@@ -19,56 +16,70 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::crossterm::event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyEventKind};
 use ratatui::crossterm::execute;
 
+// The rules, the words, the saved files and the updater are wordl's library, which this
+// game is built on. Imported here so the modules above reach them as `crate::game` etc.
+use wordl::update::Program;
+use wordl::{game, store, words};
+
 use app::{App, Options};
-use game::{Difficulty, Mode};
+use game::Mode;
+use level::Level;
 use store::Stats;
 
+/// Who the updater works for: this game, under its own name and from its own releases.
+const PROGRAM: Program = Program { name: "funwordl", version: env!("CARGO_PKG_VERSION"), repo: "anwarahmed/funwordl" };
+/// The commit this binary was built from, for `--version`; empty if unknown, `-dirty`
+/// if the tree had local changes.
+const COMMIT: &str = env!("FUNWORDL_COMMIT");
+
 const USAGE: &str = "\
-wordl - a Wordle-style word game for the terminal
+funwordl - a playful Wordle-style word game for the terminal
 
 Usage:
-  wordl [options]           play
-  wordl update              check for a newer release now and install it
-  wordl update off | on     stop, or resume, checking when the game starts
-  wordl --help | --version | --licenses
+  funwordl [options]        play
+  funwordl update           check for a newer release now and install it
+  funwordl update off | on  stop, or resume, checking when the game starts
+  funwordl --help | --version | --licenses
 
 Options:
   -p, --practice            start with a new random word (default)
   -d, --daily               start with today's puzzle
-  -t, --theme NAME          midnight, daylight, neon, contrast, ocean, ember, paper, sky, candy
-                            or terminal
-      --normal              any dictionary word is a valid guess
+  -t, --theme NAME          candy, sky, paper, daylight, midnight, neon, contrast, ocean,
+                            ember or terminal
+      --easy                eight guesses, and hints with Tab (default)
+      --normal              six guesses; any dictionary word is a valid guess
       --hard                green letters stay fixed, yellow letters must be reused
       --ultra               ultra hard: also, yellow letters must move to another
                             spot and gray letters may not be played again
-      --no-animation        skip the tile animations
+      --no-animation        skip the tile animations and the confetti
 
-In the game: type letters, Enter to submit, Backspace to delete.
-  ?  help        ^N new word      ^D daily puzzle    ^S statistics
-  ^T theme       ^X difficulty    ^G give up         ^Q quit
+In the game: type letters, Enter to guess, Backspace to delete.
+  ?  help        Tab hint         ^N new word        ^D daily puzzle
+  ^S stars       ^W my words      ^T theme           ^X level
+  ^G show the word                ^Q quit
 The on-screen keyboard and the buttons can be clicked with the mouse.
 
 Environment:
-  WORDL_NO_UPDATE           set to skip the update check for one run
+  FUNWORDL_NO_UPDATE        set to skip the update check for one run
 
-Statistics are kept in $XDG_STATE_HOME/wordl (~/.local/state/wordl).
+Stars and words are kept in $XDG_STATE_HOME/funwordl (~/.local/state/funwordl).
 ";
 
 fn fail(msg: &str) -> ExitCode {
-    eprintln!("wordl: {msg}");
+    eprintln!("funwordl: {msg}");
     ExitCode::FAILURE
 }
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let mut stats = Stats::load(store::state_dir());
+    let mut stats = Stats::load(store::state_dir(PROGRAM.name));
     let mut options = Options {
         mode: Mode::Practice,
         theme: None,
-        difficulty: None,
-        animate: std::env::var_os("WORDL_NO_ANIM").is_none_or(|v| v.is_empty()),
+        level: None,
+        animate: std::env::var_os("FUNWORDL_NO_ANIM").is_none_or(|v| v.is_empty()),
         truecolor: matches!(std::env::var("COLORTERM").as_deref(), Ok("truecolor" | "24bit")),
-        debug_answer: std::env::var("WORDL_DEBUG_ANSWER").ok().and_then(|w| game::word(&w)),
+        debug_answer: std::env::var("FUNWORDL_DEBUG_ANSWER").ok().and_then(|w| game::word(&w)),
     };
 
     let mut rest = args.iter().map(String::as_str);
@@ -79,17 +90,17 @@ fn main() -> ExitCode {
                 return ExitCode::SUCCESS;
             }
             "-v" | "-V" | "--version" => {
-                println!("wordl {} ({})", update::VERSION, if update::COMMIT.is_empty() { "unknown commit" } else { update::COMMIT });
+                println!("funwordl {} ({})", PROGRAM.version, if COMMIT.is_empty() { "unknown commit" } else { COMMIT });
                 return ExitCode::SUCCESS;
             }
             "--licenses" => {
-                print!("wordl is MIT licensed:\n\n{}\n", include_str!("../LICENSE"));
+                print!("funwordl is MIT licensed:\n\n{}\n", include_str!("../LICENSE"));
                 print!("Its word lists are derived from SCOWL, which asks for this notice:\n\n{}", words::SCOWL_NOTICE);
                 return ExitCode::SUCCESS;
             }
             "update" => {
                 return match rest.next() {
-                    None => update::command().map_or_else(|e| fail(&e), |()| ExitCode::SUCCESS),
+                    None => PROGRAM.command().map_or_else(|e| fail(&e), |()| ExitCode::SUCCESS),
                     Some(switch @ ("on" | "off")) => {
                         stats.set("update", (switch == "on") as u8);
                         stats.save();
@@ -105,9 +116,10 @@ fn main() -> ExitCode {
                 Some(name) if theme::NAMES.contains(&name) => options.theme = Some(name.to_string()),
                 name => return fail(&format!("unknown theme '{}' (choose from: {})", name.unwrap_or_default(), theme::NAMES.join(" "))),
             },
-            "--normal" => options.difficulty = Some(Difficulty::Normal),
-            "--hard" => options.difficulty = Some(Difficulty::Hard),
-            "--ultra" => options.difficulty = Some(Difficulty::Ultra),
+            "--easy" => options.level = Some(Level::Easy),
+            "--normal" => options.level = Some(Level::Normal),
+            "--hard" => options.level = Some(Level::Hard),
+            "--ultra" => options.level = Some(Level::Ultra),
             "--no-animation" => options.animate = false,
             other => return fail(&format!("unknown option '{other}' (try --help)")),
         }
@@ -116,7 +128,7 @@ fn main() -> ExitCode {
     if !io::stdin().is_terminal() || !stdout().is_terminal() {
         return fail("needs an interactive terminal.");
     }
-    update::before_start(stats.auto_update());
+    PROGRAM.before_start(stats.auto_update());
 
     // Installed before ratatui's hook, which restores the terminal and then calls this one.
     let default_hook = std::panic::take_hook();
@@ -236,4 +248,14 @@ fn run(app: &mut App) -> io::Result<()> {
     let _ = execute!(stdout(), DisableMouseCapture);
     ratatui::restore();
     result
+}
+
+#[cfg(test)]
+mod tests {
+    /// The notice the packages install from this repository is the one that came with
+    /// the word lists, which live in wordl.
+    #[test]
+    fn the_scowl_notice_here_is_the_librarys() {
+        assert_eq!(include_str!("../SCOWL-COPYRIGHT"), wordl::words::SCOWL_NOTICE);
+    }
 }

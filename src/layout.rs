@@ -47,7 +47,14 @@ const LEVELS: [i32; 15] = [16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 3, 2, 1];
 /// The smallest terminal the game fits in with the keyboard under the board. A wide
 /// terminal can be shorter, with the keyboard beside it.
 pub const MIN_COLS: i32 = 39;
-pub const MIN_ROWS: i32 = 12;
+
+/// The fewest rows a board of `tries` rows fits in: 12 for six guesses, 14 for eight.
+pub fn min_rows(tries: usize) -> i32 {
+    tries as i32 + 6
+}
+
+/// The letters of the title, FUNWORDL.
+pub const TITLE_LETTERS: i32 = 8;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Kind {
@@ -107,10 +114,10 @@ fn title_height(level: i32) -> i32 {
     if level == 1 { 1 } else { level + 1 }
 }
 
-/// The biggest board that fits, as (board, keyboard, title) levels.
-fn fit(kind: Kind, cols: i32, rows: i32) -> Option<(i32, i32, i32)> {
+/// The biggest board of `tries` rows that fits, as (board, keyboard, title) levels.
+fn fit(kind: Kind, cols: i32, rows: i32, tries: i32) -> Option<(i32, i32, i32)> {
     for l in LEVELS {
-        let (bw, bh) = Dims::of(l).grid(5, 6);
+        let (bw, bh) = Dims::of(l).grid(5, tries);
         if bw > cols || (kind == Kind::Side && bh > rows - 1) {
             continue;
         }
@@ -121,7 +128,7 @@ fn fit(kind: Kind, cols: i32, rows: i32) -> Option<(i32, i32, i32)> {
                 if hv > 1 && hv > l {
                     continue;
                 }
-                let (tw, _) = Dims::of(hv).grid(5, 1);
+                let (tw, _) = Dims::of(hv).grid(TITLE_LETTERS, 1);
                 let hh = title_height(hv);
                 let fits = match kind {
                     Kind::Stacked => kw <= cols && tw <= cols && hh + bh + 1 + kh < rows,
@@ -136,11 +143,13 @@ fn fit(kind: Kind, cols: i32, rows: i32) -> Option<(i32, i32, i32)> {
     None
 }
 
-/// Lays the game out for a terminal of `cols` by `rows`, or `None` when it is too
-/// small. Whichever of the two arrangements allows bigger tiles wins.
-pub fn layout(cols: i32, rows: i32) -> Option<Layout> {
-    let stacked = fit(Kind::Stacked, cols, rows);
-    let side = fit(Kind::Side, cols, rows);
+/// Lays the game out for a terminal of `cols` by `rows` and a board of `tries` rows, or
+/// `None` when the terminal is too small. Whichever of the two arrangements allows
+/// bigger tiles wins.
+pub fn layout(cols: i32, rows: i32, tries: usize) -> Option<Layout> {
+    let tries = tries as i32;
+    let stacked = fit(Kind::Stacked, cols, rows, tries);
+    let side = fit(Kind::Side, cols, rows, tries);
     let (kind, (l, k, hv)) = match (stacked, side) {
         (Some(s), Some(p)) if s.0 > p.0 || (s.0 == p.0 && s.1 >= p.1) => (Kind::Stacked, s),
         (_, Some(p)) => (Kind::Side, p),
@@ -149,9 +158,9 @@ pub fn layout(cols: i32, rows: i32) -> Option<Layout> {
     };
 
     let (board, keys, title) = (Dims::of(l), Dims::of(k), Dims::of(hv));
-    let (bw, bh) = board.grid(5, 6);
+    let (bw, bh) = board.grid(5, tries);
     let (kw, kh) = keys.grid(10, 3);
-    let (tw, _) = title.grid(5, 1);
+    let (tw, _) = title.grid(TITLE_LETTERS, 1);
     let hh = title_height(hv);
     // The bottom row is a wide key, seven letters and a wide key; the two wide keys
     // share what ten keys' width leaves.
@@ -233,43 +242,52 @@ mod tests {
 
     #[test]
     fn standard_sizes() {
-        let l = layout(80, 24).unwrap();
+        let l = layout(80, 24, 6).unwrap();
         assert_eq!((l.kind, l.board.t, l.keys.t, l.title_level), (Kind::Stacked, 3, 1, 1));
         assert_eq!((l.bx, l.by, l.kx, l.ky, l.msg_y, l.footer_y), (23, 1, 20, 20, 19, 23));
+        // Eight rows of the same tiles do not fit 24 rows, so they get smaller.
+        let l = layout(80, 24, 8).unwrap();
+        assert_eq!((l.kind, l.board.t, l.board.w), (Kind::Stacked, 1, 5));
         // A wide terminal puts the keyboard beside the board and gets bigger tiles.
-        let l = layout(190, 50).unwrap();
+        let l = layout(190, 50, 6).unwrap();
         assert_eq!((l.kind, l.board.t, l.keys.t), (Kind::Side, 8, 5));
-        assert_eq!(layout(39, 12).unwrap().board.w, 3);
-        assert_eq!(layout(38, 12), None);
-        assert_eq!(layout(39, 11), None);
-        assert_eq!(layout(0, 0), None);
+        assert_eq!(layout(190, 50, 8).unwrap().kind, Kind::Side);
+        assert_eq!(layout(39, 12, 6).unwrap().board.w, 3);
+        assert_eq!(layout(39, 14, 8).unwrap().board.w, 3);
+        assert_eq!(layout(38, 12, 6), None);
+        assert_eq!(layout(39, 11, 6), None);
+        assert_eq!(layout(39, 13, 8), None);
+        assert_eq!(layout(0, 0, 8), None);
     }
 
-    /// Every size from tiny to huge: the game must fit whenever the terminal is at
-    /// least 39x12, and nothing may be off screen or on top of something else.
+    /// Every size from tiny to huge, for six rows and for eight: the game must fit
+    /// whenever the terminal is at least 39 columns by `min_rows`, and nothing may be
+    /// off screen or on top of something else.
     #[test]
     fn nothing_overlaps_or_leaves_the_screen_at_any_size() {
-        for rows in 0..=100 {
-            for cols in 0..=420 {
-                let Some(l) = layout(cols, rows) else {
-                    assert!(cols < MIN_COLS || rows < MIN_ROWS, "{cols}x{rows} does not fit");
-                    continue;
-                };
-                let at = format!("{cols}x{rows} {:?}", l.kind);
-                let (bw, bh) = l.board.grid(5, 6);
-                let (kw, kh) = l.keys.grid(10, 3);
-                let (tw, _) = l.title.grid(5, 1);
-                let hh = title_height(l.title_level);
-                assert!(l.bx >= 0 && l.bx + bw <= cols, "{at}: board sideways");
-                assert!(l.by >= 0 && l.by + bh < rows, "{at}: board over the footer");
-                assert!(l.kx >= 0 && l.kx + kw <= cols, "{at}: keyboard sideways");
-                assert!(l.ky + kh < rows, "{at}: keyboard over the footer");
-                assert!(l.hy >= 0 && l.hx >= 0 && l.hx + tw <= cols, "{at}: title");
-                assert!(l.msg_y >= l.hy + hh && l.ky > l.msg_y, "{at}: title, message, keyboard");
-                assert_eq!(l.wide_left + l.wide_right + 7 * l.keys.w + 8 * (l.keys.px - l.keys.w), kw, "{at}: bottom row");
-                match l.kind {
-                    Kind::Stacked => assert!(l.by >= l.hy + hh && l.msg_y >= l.by + bh, "{at}: board, title, message"),
-                    Kind::Side => assert!(l.rx > l.bx + bw && l.hx >= l.rx && l.kx >= l.rx, "{at}: board and side panel"),
+        for tries in [6, 8] {
+            for rows in 0..=100 {
+                for cols in 0..=420 {
+                    let Some(l) = layout(cols, rows, tries) else {
+                        assert!(cols < MIN_COLS || rows < min_rows(tries), "{cols}x{rows} does not fit {tries} rows");
+                        continue;
+                    };
+                    let at = format!("{cols}x{rows} {:?} {tries} rows", l.kind);
+                    let (bw, bh) = l.board.grid(5, tries as i32);
+                    let (kw, kh) = l.keys.grid(10, 3);
+                    let (tw, _) = l.title.grid(TITLE_LETTERS, 1);
+                    let hh = title_height(l.title_level);
+                    assert!(l.bx >= 0 && l.bx + bw <= cols, "{at}: board sideways");
+                    assert!(l.by >= 0 && l.by + bh < rows, "{at}: board over the footer");
+                    assert!(l.kx >= 0 && l.kx + kw <= cols, "{at}: keyboard sideways");
+                    assert!(l.ky + kh < rows, "{at}: keyboard over the footer");
+                    assert!(l.hy >= 0 && l.hx >= 0 && l.hx + tw <= cols, "{at}: title");
+                    assert!(l.msg_y >= l.hy + hh && l.ky > l.msg_y, "{at}: title, message, keyboard");
+                    assert_eq!(l.wide_left + l.wide_right + 7 * l.keys.w + 8 * (l.keys.px - l.keys.w), kw, "{at}: bottom row");
+                    match l.kind {
+                        Kind::Stacked => assert!(l.by >= l.hy + hh && l.msg_y >= l.by + bh, "{at}: board, title, message"),
+                        Kind::Side => assert!(l.rx > l.bx + bw && l.hx >= l.rx && l.kx >= l.rx, "{at}: board and side panel"),
+                    }
                 }
             }
         }

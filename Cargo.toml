@@ -1,19 +1,19 @@
 [package]
-name = "wordl"
-version = "0.2.8"
+name = "funwordl"
+version = "0.1.0"
 edition = "2024"
 # Oldest toolchain that builds this; the `msrv` CI job keeps it true.
 rust-version = "1.88"
 license = "MIT"
-repository = "https://github.com/anwarahmed/wordl"
-description = "A Wordle-style word game for the terminal"
-readme = "README.md"
+repository = "https://github.com/anwarahmed/funwordl"
+description = "A playful Wordle-style word game for the terminal, made for children"
 
 [dependencies]
 chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
 ratatui = "0.30.2"
-sha2 = "0.11.0"
-ureq = "3.4.2"
+# The rules, the word lists and their definitions, the saved files and the updater are
+# wordl's library. Raise `rev` to take a fix made there.
+wordl = { git = "https://github.com/anwarahmed/wordl", rev = "9aed85ea455098a5c2a884e44de0b31972b80f88" }
 
 [profile.release]
 lto = true

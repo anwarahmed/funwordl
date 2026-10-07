@@ -8,13 +8,15 @@ use ratatui::Frame;
 use ratatui::buffer::Buffer;
 use ratatui::style::{Color, Style};
 
-use crate::app::{Action, App, FLASH_STEP, FLIP, KeyId, MessageKind, Modal, SHAKE_STEP};
+use crate::app::{Action, App, CONFETTI, FLASH_STEP, FLIP, KeyId, MessageKind, Modal, SHAKE_STEP};
 use crate::font::{self, Label};
 use crate::game::{self, Mark, Mode, Status};
-use crate::layout::{self, Layout};
+use crate::layout::{self, Layout, TITLE_LETTERS};
+use crate::level::Level;
 use crate::theme::{self, Paint, Shades, Theme};
 use crate::words;
 
+const TITLE: &str = "FUNWORDL";
 const KEY_ROWS: [&str; 3] = ["QWERTYUIOP", "ASDFGHJKL", "ZXCVBNM"];
 /// Dialog lines are at most this wide, so a dialog fits the narrowest supported
 /// terminal (39 columns) with its frame and padding.
@@ -55,6 +57,29 @@ impl Canvas<'_> {
                 cell.reset();
                 cell.set_char(ch).set_style(style);
             }
+        }
+    }
+
+    /// Colors one pixel, half a cell, leaving the other half of the cell as it is. Only
+    /// cells that are empty or already hold two pixels can take one: text is left alone.
+    fn pixel(&mut self, x: i32, row: i32, color: Color) {
+        if x < 0 || row < 0 {
+            return;
+        }
+        let Some(cell) = self.buf.cell_mut((x as u16, (row / 2) as u16)) else { return };
+        let upper = row % 2 == 0;
+        match (cell.symbol().chars().next(), upper) {
+            (Some(' '), _) => {
+                cell.set_char(if upper { '▀' } else { '▄' }).set_fg(color);
+            }
+            // The character's color is the half it draws; the background is the other.
+            (Some('▀'), true) | (Some('▄'), false) => {
+                cell.set_fg(color);
+            }
+            (Some('▀'), false) | (Some('▄'), true) => {
+                cell.set_bg(color);
+            }
+            _ => {}
         }
     }
 
@@ -194,40 +219,60 @@ fn info_text(app: &App) -> String {
         Mode::Daily => format!("Daily #{}", app.daily_number()),
         Mode::Practice => "Practice".to_string(),
     };
-    if game.difficulty != game::Difficulty::Normal {
-        s += &format!(" · {}", game.difficulty.name());
+    let level = Level::of(game);
+    if level != Level::Easy {
+        s += &format!(" · {}", level.name());
+    }
+    let stars = app.stats.num("stars");
+    if stars > 0 {
+        s += &format!(" · ★ {stars}");
     }
     let streak = app.stats.of(game.mode, "streak");
-    if streak > 0 {
-        s += &format!(" · Streak {streak}");
+    if streak > 1 {
+        s += &format!(" · {streak} in a row");
     }
     s
+}
+
+/// The layout for the game being played: an Easy game's board has two more rows.
+fn layout_for(app: &App, cols: i32, rows: i32) -> Option<Layout> {
+    layout::layout(cols, rows, app.game.tries)
 }
 
 fn draw_title(c: &mut Canvas, app: &App, l: &Layout) {
     let th = c.th;
     let info = info_text(app);
     let dim = on(th.dim.fg, th.bg.bg);
+    let (party, ink) = th.party();
+    let (tw, _) = l.title.grid(TITLE_LETTERS, 1);
     let mut x = l.hx;
     match l.info_y {
         Some(y) => c.center(y, l.rx, l.rw, &info, dim),
         // On one row: the title, two spaces, the info, centered together when they fit.
-        None if 19 + 2 + width(&info) <= l.rw => {
-            x = l.rx + (l.rw - 21 - width(&info)) / 2;
-            c.put(x + 21, l.hy, &info, dim);
+        None if tw + 2 + width(&info) <= l.rw => {
+            x = l.rx + (l.rw - tw - 2 - width(&info)) / 2;
+            c.put(x + tw + 2, l.hy, &info, dim);
+        }
+        // Too narrow for both: the info matters more than the tiles, so the title is
+        // written small, one colored letter per cell.
+        None if TITLE_LETTERS + 2 + width(&info) <= l.rw => {
+            x = l.rx + (l.rw - TITLE_LETTERS - 2 - width(&info)) / 2;
+            for (i, letter) in TITLE.chars().enumerate() {
+                c.put(x + i as i32, l.hy, &letter.to_string(), on(party[i].fg, th.bg.bg).bold());
+            }
+            return c.put(x + TITLE_LETTERS + 2, l.hy, &info, dim);
         }
         None => {}
     }
-    let colors = [(th.g, th.gfg), (th.y, th.yfg), (th.x, th.xfg), (th.g, th.gfg), (th.y, th.yfg)];
-    for (i, (letter, (bg, fg))) in "WORDL".bytes().zip(colors).enumerate() {
-        c.block(x + i as i32 * l.title.px, l.hy, l.title.w, l.title.t, true, bg, fg, Label::Letter(letter), 0, false);
+    for (i, letter) in TITLE.bytes().enumerate() {
+        c.block(x + i as i32 * l.title.px, l.hy, l.title.w, l.title.t, true, party[i], ink, Label::Letter(letter), 0, false);
     }
 }
 
 /// How far the row being typed is pushed sideways by the shake after a refused guess.
 fn shake_offset(app: &App, l: &Layout) -> i32 {
     let Some(start) = app.shake else { return 0 };
-    let (bw, _) = l.board.grid(5, 6);
+    let (bw, _) = l.board.grid(5, 1);
     let room = 2.min(l.bx).min(l.cols - l.bx - bw);
     if room < 1 {
         return 0;
@@ -285,11 +330,14 @@ fn draw_tile(c: &mut Canvas, app: &App, l: &Layout, row: usize, col: usize) {
     } else {
         None
     };
-    let label = letter.map_or(Label::None, Label::Letter);
+    // A letter given by a hint waits, faintly, in its spot of the row being typed.
+    let hinted = (letter.is_none() && row == guessed && game.playing() && app.hint_letters.contains(&col)).then_some(game.answer[col]);
+    let ink = if hinted.is_some() { th.dim } else { th.fg };
+    let label = letter.or(hinted).map_or(Label::None, Label::Letter);
     if d.t == 1 {
-        c.block(x, y, d.w, 1, true, th.empty, th.fg, label, 0, false);
+        c.block(x, y, d.w, 1, true, th.empty, ink, label, 0, false);
     } else {
-        c.block(x, y, d.w, d.t, false, if letter.is_some() { th.typed } else { th.empty }, th.fg, label, inset, false);
+        c.block(x, y, d.w, d.t, false, if letter.is_some() { th.typed } else { th.empty }, ink, label, inset, false);
     }
 }
 
@@ -361,12 +409,13 @@ pub fn footer_items(app: &App, cols: i32) -> (Vec<FooterItem>, bool) {
     let level = app.chosen.name().split(' ').next().unwrap_or_default();
     let items = [
         ("?", "Help", Action::Help),
+        ("Tab", "Hint", Action::Hint),
         ("^N", "New", Action::New),
         ("^D", "Daily", Action::Daily),
-        ("^S", "Stats", Action::Stats),
+        ("^S", "Stars", Action::Stats),
         ("^T", "Theme", Action::Theme),
         ("^X", level, Action::Difficulty),
-        ("^G", "Give up", Action::GiveUp),
+        ("^G", "Reveal", Action::GiveUp),
         ("^Q", "Quit", Action::Quit),
     ];
     let count = items.len() as i32;
@@ -397,10 +446,10 @@ fn draw_footer(c: &mut Canvas, app: &App, l: &Layout) {
         if !labels {
             continue;
         }
-        // The difficulty's name is colored when it is not Normal.
+        // The level's name is colored when it is one of the hard ones.
         let style = match (item.action, app.chosen) {
-            (Action::Difficulty, game::Difficulty::Hard) => on(th.g.fg, th.bg.bg).bold(),
-            (Action::Difficulty, game::Difficulty::Ultra) => on(th.y.fg, th.bg.bg).bold(),
+            (Action::Difficulty, Level::Hard) => on(th.g.fg, th.bg.bg).bold(),
+            (Action::Difficulty, Level::Ultra) => on(th.y.fg, th.bg.bg).bold(),
             _ => on(th.dim.fg, th.bg.bg),
         };
         c.put(item.x + width(item.key) + 1, l.footer_y, &item.label, style);
@@ -424,22 +473,31 @@ struct Dialog {
     buttons: Vec<(&'static str, Action)>,
 }
 
+/// Three stars, the first `earned` of them lit.
+fn star_spans(earned: usize, lit: Style, unlit: Style) -> Vec<(String, Style)> {
+    vec![("★".repeat(earned), lit), ("☆".repeat(3 - earned.min(3)), unlit)]
+}
+
 fn dialog(app: &App) -> Option<Dialog> {
     let th = &app.theme;
     let panel = th.panel.bg;
     let text = on(th.fg.fg, panel);
     let dim = on(th.dim.fg, panel);
     let accent = on(th.accent.fg, panel).bold();
+    let gold = on(th.y.fg, panel).bold();
     let line = |spans: Vec<(String, Style)>| DialogLine { spans, center: false };
     let middle = |s: &str, style: Style| DialogLine { spans: vec![(s.to_string(), style)], center: true };
+    let centered = |spans: Vec<(String, Style)>| DialogLine { spans, center: true };
     let blank = || DialogLine { spans: Vec::new(), center: false };
     let game = &app.game;
+    let answer = game::text(&game.answer);
+    let meaning = words::definition(&answer).unwrap_or_default();
 
     Some(match app.modal {
         Modal::None => return None,
         Modal::Help => {
             let mut lines = vec![middle("HOW TO PLAY", accent), blank()];
-            for s in ["Guess the hidden word in 6 tries.", "Each guess must be a real 5-letter", "word. The tiles then show:"] {
+            for s in ["Guess the hidden 5-letter word.", "The tiles show how close you are:"] {
                 lines.push(line(vec![(s.to_string(), text)]));
             }
             lines.push(blank());
@@ -451,39 +509,41 @@ fn dialog(app: &App) -> Option<Dialog> {
             }
             lines.push(blank());
             for (k1, d1, k2, d2) in [
-                ("A-Z", "type", "Enter", "submit"),
-                ("Bksp", "delete", "?", "this help"),
-                ("^N", "new game", "^D", "daily puzzle"),
-                ("^S", "statistics", "^T", "change theme"),
-                ("^X", "difficulty", "^G", "give up"),
-                ("^Q", "quit", "", ""),
+                ("A-Z", "type", "Enter", "guess"),
+                ("Bksp", "delete", "Tab", "hint"),
+                ("^N", "new word", "^D", "daily puzzle"),
+                ("^S", "stars", "^W", "my words"),
+                ("^T", "theme", "^X", "level"),
+                ("^G", "show the word", "^Q", "quit"),
             ] {
                 let pad = " ".repeat((17 - width(k1) - width(d1)).max(0) as usize);
                 lines.push(line(vec![(k1.to_string(), accent), (format!(" {d1}{pad}"), text), (k2.to_string(), accent), (format!(" {d2}"), text)]));
             }
             lines.push(blank());
-            for (level, rule) in [("Normal", "any real word"), ("Hard", "reuse green and yellow"), ("Ultra", "obey every clue")] {
+            for (level, rule) in [("Easy", "8 guesses, and hints"), ("Normal", "6 guesses"), ("Hard", "reuse green and yellow"), ("Ultra", "obey every clue")] {
                 lines.push(line(vec![(format!("{level:<8}"), text.bold()), (rule.to_string(), dim)]));
             }
             Dialog { lines, buttons: vec![("Esc Close", Action::Close)] }
         }
         Modal::Stats => {
             let mode = game.mode;
-            let played = app.stats.of(mode, "played");
-            let percent = if played > 0 { app.stats.of(mode, "wins") * 100 / played } else { 0 };
-            let mut lines = vec![middle(&format!("STATISTICS · {}", mode.key().to_uppercase()), accent), blank()];
+            let title = match game.status {
+                Status::Won => "YOU DID IT!".to_string(),
+                Status::Lost => "NICE TRY".to_string(),
+                Status::Playing => format!("STARS · {}", mode.key().to_uppercase()),
+            };
+            let mut lines = vec![middle(&title, accent), blank()];
             // Once a game is over the word is given with what it means: the players are
             // children, and this is where a new word gets learned.
-            let answer = game::text(&game.answer);
-            let meaning = words::definition(&answer).unwrap_or_default();
-            let word_style = on(th.y.fg, panel).bold();
             match game.status {
                 Status::Won => {
-                    lines.push(middle(&format!("Solved in {}/6", game.guesses.len()), on(th.g.fg, panel).bold()));
+                    let mut spans = star_spans(app.stars(), gold, dim);
+                    spans.push((format!("  Solved in {}/{}", game.guesses.len(), game.tries), on(th.g.fg, panel).bold()));
+                    lines.push(centered(spans));
                     // "CRANE: a tall bird..." with the word picked out on the first line.
                     for (i, row) in wrap(&format!("{answer}: {meaning}"), DIALOG_WIDTH as usize).into_iter().enumerate() {
                         match row.strip_prefix(answer.as_str()).filter(|_| i == 0 && !meaning.is_empty()) {
-                            Some(rest) => lines.push(DialogLine { spans: vec![(answer.clone(), word_style), (rest.to_string(), text)], center: true }),
+                            Some(rest) => lines.push(centered(vec![(answer.clone(), gold), (rest.to_string(), text)])),
                             None if !meaning.is_empty() => lines.push(middle(&row, text)),
                             None => {}
                         }
@@ -491,38 +551,68 @@ fn dialog(app: &App) -> Option<Dialog> {
                     lines.push(blank());
                 }
                 Status::Lost => {
-                    if game.gave_up {
-                        lines.push(middle("You gave up", dim));
-                    }
-                    lines.push(DialogLine { spans: vec![("The word was ".to_string(), text), (answer, word_style)], center: true });
+                    lines.push(centered(vec![("The word was ".to_string(), text), (answer.clone(), gold)]));
                     lines.extend(wrap(meaning, DIALOG_WIDTH as usize).iter().map(|row| middle(row, text)));
                     lines.push(blank());
                 }
                 Status::Playing => {}
             }
-            lines.push(middle(&format!("{:>6}  {:>6}  {:>6}  {:>6}", "Played", "Win %", "Streak", "Best"), dim));
-            let row = format!("{played:>6}  {percent:>6}  {:>6}  {:>6}", app.stats.of(mode, "streak"), app.stats.of(mode, "best"));
-            lines.extend([middle(&row, text.bold()), blank(), line(vec![("GUESS DISTRIBUTION".to_string(), dim)])]);
-            let counts: Vec<i64> = (1..=6).map(|i| app.stats.of(mode, &format!("d{i}"))).collect();
-            let most = counts.iter().copied().max().unwrap_or(0).max(1);
-            for (i, &count) in counts.iter().enumerate() {
-                // The count sits at the right end of its bar, so a bar is never
-                // narrower than its number.
-                let len = ((count * 26 / most) as usize).max(count.to_string().len() + 1);
-                let this_game = game.status == Status::Won && game.guesses.len() == i + 1;
-                let (bg, fg) = if this_game { (th.g, th.gfg) } else { (th.key, th.keyfg) };
-                lines.push(line(vec![(format!("{} ", i + 1), dim), (format!("{count:>len$} "), on(fg.fg, bg.bg).bold())]));
-            }
+            lines.push(middle(&format!("{:>7} {:>8} {:>6} {:>6}", "Solved", "In a row", "Best", "Stars"), dim));
+            let row = format!(
+                "{:>7} {:>8} {:>6} {:>6}",
+                app.stats.of(mode, "wins"),
+                app.stats.of(mode, "streak"),
+                app.stats.of(mode, "best"),
+                app.stats.num("stars")
+            );
+            lines.extend([middle(&row, text.bold()), blank(), middle(&format!("Words in your collection: {}", app.learned.len()), dim)]);
             let buttons = match game.status {
-                Status::Playing => vec![("Esc Close", Action::Close)],
-                _ => vec![("N New", Action::New), ("C Copy", Action::Copy), ("Esc Close", Action::Close)],
+                Status::Playing => vec![("W Words", Action::Words), ("Esc Close", Action::Close)],
+                _ => vec![("N New", Action::New), ("C Copy", Action::Copy), ("W Words", Action::Words), ("Esc", Action::Close)],
             };
             Dialog { lines, buttons }
         }
-        Modal::GiveUp => Dialog {
-            lines: vec![middle("GIVE UP?", accent), blank(), middle("The word will be shown and the", text), middle("game counts as a loss.", text)],
-            buttons: vec![("Enter Give up", Action::Surrender), ("Esc Keep playing", Action::Close)],
-        },
+        Modal::GiveUp => {
+            let what = match Level::of(game) {
+                Level::Easy => ["The word will be shown, and kept", "in your words to look at again."],
+                _ => ["The word will be shown and the", "game counts as not solved."],
+            };
+            Dialog {
+                lines: vec![middle("SHOW THE WORD?", accent), blank(), middle(what[0], text), middle(what[1], text)],
+                buttons: vec![("Enter Show it", Action::Surrender), ("Esc Keep playing", Action::Close)],
+            }
+        }
+        Modal::Hint => {
+            let mut lines = vec![middle("HINT", accent), blank(), middle("What the word means:", dim)];
+            lines.extend(wrap(meaning, DIALOG_WIDTH as usize).iter().map(|row| middle(row, text.bold())));
+            if !app.hint_letters.is_empty() {
+                let letters: Vec<String> =
+                    (0..5).map(|i| if app.hint_letters.contains(&i) { (game.answer[i] as char).to_string() } else { "_".to_string() }).collect();
+                lines.extend([blank(), centered(vec![("Letters:  ".to_string(), dim), (letters.join(" "), gold)])]);
+            }
+            let mut stars = vec![("Stars if you solve it: ".to_string(), dim)];
+            stars.extend(star_spans(app.stars(), gold, dim));
+            lines.extend([blank(), centered(stars)]);
+            let buttons = if app.more_hints() { vec![("Tab One more", Action::Hint), ("Esc Back", Action::Close)] } else { vec![("Esc Back", Action::Close)] };
+            Dialog { lines, buttons }
+        }
+        Modal::Words => {
+            let cards = app.cards();
+            let Some(&(word, stars)) = cards.get(app.card.min(cards.len().saturating_sub(1))) else {
+                let lines =
+                    vec![middle("MY WORDS", accent), blank(), middle("No words yet. Finish a game and", text), middle("its word is kept here to learn.", text)];
+                return Some(Dialog { lines, buttons: vec![("Esc Close", Action::Close)] });
+            };
+            let at = app.card.min(cards.len() - 1) + 1;
+            let mut name = vec![(format!("{}  ", word.to_uppercase()), gold)];
+            name.extend(star_spans(stars, gold, dim));
+            let mut lines = vec![middle(&format!("MY WORDS · {at} of {}", cards.len()), accent), blank(), centered(name), blank()];
+            // Always three lines of meaning, so the buttons stay put from word to word.
+            let mut rows = wrap(words::definition(word).unwrap_or_default(), DIALOG_WIDTH as usize);
+            rows.resize(3, String::new());
+            lines.extend(rows.iter().map(|row| middle(row, text)));
+            Dialog { lines, buttons: vec![("< Back", Action::CardPrev), ("> Next", Action::CardNext), ("Esc Close", Action::Close)] }
+        }
     })
 }
 
@@ -586,6 +676,39 @@ fn draw_dialog(c: &mut Canvas, app: &App, l: &Layout) {
     }
 }
 
+/// Confetti after a solved word: colored pixels falling down the whole screen, each on
+/// a path of its own that depends only on the word and the time, so nothing is kept
+/// between frames. It falls over the board and the keys but never over text.
+fn draw_confetti(c: &mut Canvas, app: &App, l: &Layout) {
+    let Some(start) = app.confetti else { return };
+    let age = app.now.saturating_duration_since(start).as_millis() as i64;
+    let (party, _) = c.th.party();
+    // Pixel rows above the footer.
+    let floor = 2 * l.footer_y as i64;
+    let mut seed = app.game.answer.iter().fold(0x9E37_79B9_7F4A_7C15_u64, |h, &b| (h ^ b as u64).wrapping_mul(0x0100_0000_01B3));
+    for _ in 0..(l.cols * 3 / 4).max(16) {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        let column = (seed % l.cols.max(1) as u64) as i64;
+        let delay = (seed >> 16) as i64 % 900;
+        // Every piece is down before the confetti's time is up.
+        let fall = CONFETTI.as_millis() as i64 - 900 - (seed >> 28) as i64 % 600;
+        let color = party[(seed >> 40) as usize % party.len()].fg;
+        if age < delay {
+            continue;
+        }
+        let row = (age - delay) * (floor + 2) / fall - 2;
+        let sway = [0, 1, 0, -1][(((age - delay) / 170 + (seed >> 50) as i64) % 4) as usize];
+        // A piece is two pixels tall, so that it is seen.
+        for row in [row, row + 1] {
+            if row < floor {
+                c.pixel((column + sway) as i32, row as i32, color);
+            }
+        }
+    }
+}
+
 pub fn draw(frame: &mut Frame, app: &App) {
     let area = frame.area();
     let (cols, rows) = (area.width as i32, area.height as i32);
@@ -595,15 +718,16 @@ pub fn draw(frame: &mut Frame, app: &App) {
     for y in 0..rows {
         c.put(0, y, &" ".repeat(cols as usize), screen);
     }
-    let Some(l) = layout::layout(cols, rows) else {
-        c.center((rows - 1) / 2, 0, cols, &format!("wordl needs {}x{}", layout::MIN_COLS, layout::MIN_ROWS), screen.bold());
+    let Some(l) = layout_for(app, cols, rows) else {
+        let needs = format!("funwordl needs {}x{}", layout::MIN_COLS, layout::min_rows(app.game.tries));
+        c.center((rows - 1) / 2, 0, cols, &needs, screen.bold());
         if rows > 2 {
             c.center((rows - 1) / 2 + 1, 0, cols, &format!("this is {cols}x{rows}"), on(th.dim.fg, th.bg.bg));
         }
         return;
     };
     draw_title(&mut c, app, &l);
-    for row in 0..6 {
+    for row in 0..app.game.tries {
         for col in 0..5 {
             draw_tile(&mut c, app, &l, row, col);
         }
@@ -611,13 +735,14 @@ pub fn draw(frame: &mut Frame, app: &App) {
     draw_message(&mut c, app, &l);
     draw_keyboard(&mut c, app, &l);
     draw_footer(&mut c, app, &l);
+    draw_confetti(&mut c, app, &l);
     draw_dialog(&mut c, app, &l);
 }
 
 /// What a click at (x, y) presses, if anything. With a dialog open only its buttons
 /// can be pressed.
 pub fn action_at(app: &App, x: i32, y: i32) -> Option<Action> {
-    let l = layout::layout(app.size.0, app.size.1)?;
+    let l = layout_for(app, app.size.0, app.size.1)?;
     if let Some(dialog) = dialog(app) {
         let b = dialog_box(&dialog, l.cols, l.rows);
         return b.buttons.into_iter().find(|&(bx, by, label, _)| y == by && x >= bx && x < bx + width(label) + 2).map(|(.., action)| action);
@@ -644,21 +769,30 @@ mod tests {
     use crate::theme;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
-    use std::time::Instant;
+    use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use std::time::{Duration, Instant};
+
+    fn app_at(name: &str, level: Level) -> (App, std::path::PathBuf) {
+        let dir = std::env::temp_dir().join(format!("funwordl-test-{}-ui-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let options = Options { mode: Mode::Practice, theme: None, level: Some(level), animate: true, truecolor: true, debug_answer: game::word("CRANE") };
+        (App::new(Stats::load(dir.clone()), options), dir)
+    }
 
     fn app(name: &str) -> (App, std::path::PathBuf) {
-        let dir = std::env::temp_dir().join(format!("wordl-test-{}-ui-{name}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        let options = Options { mode: Mode::Practice, theme: None, difficulty: None, animate: true, truecolor: true, debug_answer: game::word("CRANE") };
-        (App::new(Stats::load(dir.clone()), options), dir)
+        app_at(name, Level::Easy)
+    }
+
+    fn buffer(app: &mut App, cols: u16, rows: u16) -> Buffer {
+        app.size = (cols as i32, rows as i32);
+        let mut terminal = Terminal::new(TestBackend::new(cols, rows)).unwrap();
+        terminal.draw(|f| draw(f, app)).unwrap();
+        terminal.backend().buffer().clone()
     }
 
     /// The screen as text, one string per row.
     fn screen(app: &mut App, cols: u16, rows: u16) -> Vec<String> {
-        app.size = (cols as i32, rows as i32);
-        let mut terminal = Terminal::new(TestBackend::new(cols, rows)).unwrap();
-        terminal.draw(|f| draw(f, app)).unwrap();
-        let buf = terminal.backend().buffer();
+        let buf = buffer(app, cols, rows);
         (0..rows).map(|y| (0..cols).map(|x| buf[(x, y)].symbol()).collect()).collect()
     }
 
@@ -666,25 +800,60 @@ mod tests {
         screen.iter().any(|row| row.contains(text))
     }
 
+    fn press(app: &mut App, code: KeyCode) {
+        app.on_key(KeyEvent::new(code, KeyModifiers::NONE));
+    }
+
     #[test]
-    fn draws_the_game_at_80x24() {
+    fn draws_an_easy_game_at_80x24() {
         let (mut app, dir) = app("80x24");
         app.game.add_guess(game::word("SLATE").unwrap());
         app.game.cur = b"CR".to_vec();
         let s = screen(&mut app, 80, 24);
-        assert!(s[0].contains(" W   O   R   D   L   Practice"), "{}", s[0]);
-        // A revealed guess, then the one being typed in framed tiles.
-        assert!(s[2].contains("  S      L      A      T      E  "), "{}", s[2]);
-        assert!(s[5].contains("█ C █  █ R █  █   █"), "{}", s[5]);
+        assert!(s[0].contains(" F   U   N   W   O   R   D   L   Practice"), "{}", s[0]);
+        // Eight rows: a revealed guess, the one being typed, and six still empty.
+        assert!(s[2].contains("  S     L     A     T     E  "), "{}", s[2]);
+        assert!(s[4].contains("  C     R  "), "{}", s[4]);
+        assert_eq!(layout_for(&app, 80, 24).unwrap().by + 14, 16, "the eighth row");
         assert!(s[20].contains("Q   W   E   R   T   Y   U   I   O   P"));
         assert!(s[22].contains("⌫    Z   X   C   V   B   N   M    ↵"));
-        assert!(s[23].contains("? Help") && s[23].contains("^G Give up") && s[23].contains("^X Normal"));
+        for item in ["? Help", "Tab Hint", "^S Stars", "^X Easy", "^G Reveal", "^Q Quit"] {
+            assert!(s[23].contains(item), "{item}: {}", s[23]);
+        }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn the_other_levels_have_six_rows_and_bigger_tiles() {
+        let (mut app, dir) = app_at("six", Level::Hard);
+        app.game.add_guess(game::word("SLATE").unwrap());
+        app.game.cur = b"CR".to_vec();
+        let s = screen(&mut app, 80, 24);
+        assert!(s[0].contains("L   Practice · Hard"), "{}", s[0]);
+        assert!(s[2].contains("  S      L      A      T      E  "), "{}", s[2]);
+        assert!(s[5].contains("█ C █  █ R █  █   █"), "{}", s[5]);
+        assert!(s[23].contains("^X Hard"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_narrow_terminal_gets_a_small_title_beside_the_info() {
+        let (mut app, dir) = app("narrow");
+        let s = screen(&mut app, 39, 14);
+        assert!(s[0].contains("FUNWORDL  Practice"), "{}", s[0]);
+        // Keys only in the footer, all nine of them.
+        assert!(s[13].contains("?  Tab  ^N  ^D  ^S  ^T  ^X  ^G  ^Q"), "{}", s[13]);
+        // With no room for the info either, the title is back in tiles.
+        app.stats.set("stars", 1234567);
+        app.stats.set("practice_streak", 1234567);
+        let s = screen(&mut app, 39, 14);
+        assert!(s[0].contains("F   U   N   W   O   R   D   L"), "{}", s[0]);
         let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
     fn draws_big_letters_on_a_big_terminal() {
-        let (mut app, dir) = app("big");
+        let (mut app, dir) = app_at("big", Level::Normal);
         app.game.cur = b"L".to_vec();
         let s = screen(&mut app, 190, 50);
         // The typed L as a bitmap inside its frame: a vertical stroke, then its foot.
@@ -697,19 +866,16 @@ mod tests {
     /// the upper as the character's color and the lower as its background.
     #[test]
     fn revealed_tiles_are_shaded_pixel_art() {
-        let (mut app, dir) = app("sprite");
+        let (mut app, dir) = app_at("sprite", Level::Normal);
         app.game.add_guess(game::word("CRANE").unwrap());
-        app.size = (190, 50);
-        let l = layout::layout(190, 50).unwrap();
-        let cells = |app: &App| {
-            let mut terminal = Terminal::new(TestBackend::new(190, 50)).unwrap();
-            terminal.draw(|f| draw(f, app)).unwrap();
-            let buf = terminal.backend().buffer().clone();
+        let l = layout_for(&app, 190, 50).unwrap();
+        let cells = |app: &mut App| {
+            let buf = buffer(app, 190, 50);
             move |x: i32, y: i32| buf[((l.bx + x) as u16, (l.by + y) as u16)].clone()
         };
         let th = app.theme;
         let shades = th.shades(th.g).unwrap();
-        let at = cells(&app);
+        let at = cells(&mut app);
         // Top-left cell of the first tile: the screen above, the lit edge below.
         assert_eq!((at(0, 0).symbol(), at(0, 0).fg, at(0, 0).bg), ("▀", th.bg.bg, shades.light));
         // Further down the left edge both pixels are lit, so the cell is one color.
@@ -725,8 +891,28 @@ mod tests {
 
         // The terminal theme has no shades to work with: its tiles stay flat.
         app.theme = theme::theme("terminal", true);
-        let at = cells(&app);
+        let at = cells(&mut app);
         assert_eq!((at(0, 0).symbol(), at(0, 0).fg), ("▄", app.theme.g.fg));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn the_title_is_in_party_colors() {
+        let (mut app, dir) = app("title");
+        let l = layout_for(&app, 190, 50).unwrap();
+        let (party, _) = app.theme.party();
+        let buf = buffer(&mut app, 190, 50);
+        for (i, paint) in party.iter().enumerate() {
+            // The middle of a letter's block, clear of its edges, holds its own color.
+            let colors: Vec<Color> = (0..l.title.w)
+                .flat_map(|dx| (1..l.title.t - 1).map(move |dy| (dx, dy)))
+                .map(|(dx, dy)| buf[((l.hx + i as i32 * l.title.px + dx) as u16, (l.hy + dy) as u16)].bg)
+                .collect();
+            assert!(colors.contains(&paint.bg), "letter {i}");
+        }
+        // The terminal theme has six colors of its own for it, and no RGB.
+        let (party, ink) = theme::theme("terminal", true).party();
+        assert!(party.iter().all(|p| p.rgb.is_none()) && ink.rgb.is_none());
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -734,67 +920,174 @@ mod tests {
     fn says_when_the_terminal_is_too_small() {
         let (mut app, dir) = app("small");
         let s = screen(&mut app, 30, 8);
-        assert!(has(&s, "wordl needs 39x12") && has(&s, "this is 30x8"));
+        assert!(has(&s, "funwordl needs 39x14") && has(&s, "this is 30x8"));
+        // Six rows need less.
+        Level::Normal.apply(&mut app.game);
+        assert!(has(&screen(&mut app, 30, 8), "funwordl needs 39x12"));
+        assert!(has(&screen(&mut app, 39, 12), "^Q"));
         // Nothing to draw into at all must not panic either.
         screen(&mut app, 1, 1);
         let _ = std::fs::remove_dir_all(dir);
     }
 
-    /// Every size, theme and dialog, mid-animation: drawing must never panic, and a
-    /// dialog must keep its frame.
+    const MODALS: [Modal; 6] = [Modal::None, Modal::Help, Modal::Stats, Modal::GiveUp, Modal::Hint, Modal::Words];
+
+    /// Every size, theme, level and dialog, mid-animation: drawing must never panic,
+    /// and a dialog must keep its frame.
     #[test]
     fn draws_everything_at_any_size() {
-        let (mut app, dir) = app("sweep");
-        app.game.add_guess(game::word("SLATE").unwrap());
-        app.game.add_guess(game::word("CRANE").unwrap());
-        app.reveal = Some((1, Instant::now()));
-        app.shake = Some(Instant::now());
-        app.celebrate = Some((1, Instant::now()));
-        for (cols, rows) in [(39, 12), (40, 13), (60, 20), (68, 7), (80, 24), (100, 30), (120, 40), (190, 50), (250, 70), (400, 100), (39, 100), (400, 12)] {
-            for name in theme::NAMES {
-                for truecolor in [true, false] {
-                    app.theme = theme::theme(name, truecolor);
-                    for modal in [Modal::None, Modal::Help, Modal::Stats, Modal::GiveUp] {
-                        app.modal = modal;
-                        let s = screen(&mut app, cols, rows);
-                        if modal == Modal::None {
-                            assert!(has(&s, "^Q"), "{cols}x{rows}");
-                        } else {
-                            assert!(has(&s, "╭") && has(&s, "╯"), "{cols}x{rows} {modal:?}");
+        for level in [Level::Easy, Level::Normal] {
+            let (mut app, dir) = app_at("sweep", level);
+            app.game.add_guess(game::word("SLATE").unwrap());
+            app.game.add_guess(game::word("CRANE").unwrap());
+            app.learned.insert("crane".to_string(), "2".to_string());
+            (app.hints, app.hint_letters) = (3, vec![0, 2]);
+            app.reveal = Some((1, Instant::now()));
+            app.shake = Some(Instant::now());
+            app.celebrate = Some((1, Instant::now()));
+            app.now = Instant::now() + Duration::from_millis(1200);
+            app.confetti = Some(Instant::now());
+            for (cols, rows) in [(39, 14), (40, 15), (60, 20), (68, 9), (80, 24), (100, 30), (120, 40), (190, 50), (250, 70), (400, 100), (39, 100), (400, 14)]
+            {
+                for name in theme::NAMES {
+                    for truecolor in [true, false] {
+                        app.theme = theme::theme(name, truecolor);
+                        for modal in MODALS {
+                            app.modal = modal;
+                            let s = screen(&mut app, cols, rows);
+                            if modal == Modal::None {
+                                assert!(has(&s, "^Q"), "{cols}x{rows}");
+                            } else {
+                                assert!(has(&s, "╭") && has(&s, "╯"), "{cols}x{rows} {modal:?}");
+                            }
                         }
                     }
                 }
             }
+            let _ = std::fs::remove_dir_all(dir);
         }
-        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    fn fits(app: &App, what: &str) {
+        let d = dialog(app).unwrap();
+        assert!(d.lines.iter().all(|l| l.width() <= DIALOG_WIDTH), "{what}: {:?}", d.lines.iter().map(DialogLine::width).max());
+        let buttons: i32 = d.buttons.iter().map(|(label, _)| width(label) + 4).sum::<i32>() - 2;
+        assert!(buttons <= DIALOG_WIDTH, "{what}: buttons are {buttons} wide");
     }
 
     #[test]
     fn dialogs_fit_the_narrowest_terminal() {
         let (mut app, dir) = app("dialogs");
-        for modal in [Modal::Help, Modal::Stats, Modal::GiveUp] {
-            app.modal = modal;
-            let d = dialog(&app).unwrap();
-            assert!(d.lines.iter().all(|l| l.width() <= DIALOG_WIDTH), "{modal:?}");
-            let buttons: i32 = d.buttons.iter().map(|(label, _)| width(label) + 4).sum::<i32>() - 2;
-            assert!(buttons <= DIALOG_WIDTH, "{modal:?} buttons");
+        // Numbers as wide as they will ever get.
+        for key in ["practice_wins", "practice_streak", "practice_best", "stars"] {
+            app.stats.set(key, 99999);
         }
+        (app.hints, app.hint_letters) = (4, vec![0, 2, 4]);
+        for level in Level::ALL {
+            level.apply(&mut app.game);
+            for modal in &MODALS[1..] {
+                app.modal = *modal;
+                fits(&app, &format!("{modal:?} at {level:?}, playing"));
+            }
+        }
+        Level::Easy.apply(&mut app.game);
         app.game.give_up();
+        app.learned.insert("crane".to_string(), "0".to_string());
+        for modal in [Modal::Stats, Modal::Words] {
+            app.modal = modal;
+            fits(&app, &format!("{modal:?}, given up"));
+        }
         app.modal = Modal::Stats;
         let s = screen(&mut app, 39, 24);
-        assert!(has(&s, "You gave up") && has(&s, "The word was CRANE") && has(&s, " N New "));
+        assert!(has(&s, "NICE TRY") && has(&s, "The word was CRANE") && has(&s, " N New ") && has(&s, " W Words "), "{s:#?}");
         // The meaning of the word comes with it, wrapped to the dialog.
         assert!(has(&s, "a tall bird with long legs; a") && has(&s, "machine that lifts"), "{s:#?}");
 
-        // After a win the word is named with its meaning too.
+        // After a win the word is named with its meaning too, and the stars it earned.
         app.act(Action::New);
         app.game.answer = game::word("SKEIN").unwrap();
         app.game.add_guess(game::word("SKEIN").unwrap());
         app.modal = Modal::Stats;
+        fits(&app, "Stats, won");
         let s = screen(&mut app, 80, 24);
-        assert!(has(&s, "Solved in 1/6") && has(&s, "SKEIN: a loose bundle of yarn or"), "{s:#?}");
-        // The tallest the dialog gets still fits 24 rows, buttons and all.
-        assert!(has(&s, "╭") && has(&s, "╯") && has(&s, " Esc Close "));
+        assert!(has(&s, "YOU DID IT!") && has(&s, "★★★  Solved in 1/8") && has(&s, "SKEIN: a loose bundle of yarn or"), "{s:#?}");
+        assert!(has(&s, "╭") && has(&s, "╯") && has(&s, " Esc "));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn hints_show_the_meaning_then_letters_on_the_board() {
+        let (mut app, dir) = app("hints");
+        press(&mut app, KeyCode::Tab);
+        let s = screen(&mut app, 80, 24);
+        assert!(has(&s, "What the word means:") && has(&s, "a tall bird with long legs; a"), "{s:#?}");
+        assert!(has(&s, "Stars if you solve it: ★★☆") && has(&s, " Tab One more ") && !has(&s, "Letters:"), "{s:#?}");
+        press(&mut app, KeyCode::Tab);
+        press(&mut app, KeyCode::Tab);
+        let s = screen(&mut app, 80, 24);
+        assert!(has(&s, "Letters:  C _ A _ _") && has(&s, "Stars if you solve it: ★☆☆"), "{s:#?}");
+        // Back in the game the letters wait in the row being typed, until typed over.
+        press(&mut app, KeyCode::Esc);
+        let row = |app: &mut App| screen(app, 80, 24)[2].trim().to_string();
+        assert_eq!(row(&mut app), "C           A");
+        app.game.cur = b"S".to_vec();
+        assert_eq!(row(&mut app), "S           A");
+        // Once there is nothing more to give, the button goes.
+        press(&mut app, KeyCode::Tab);
+        press(&mut app, KeyCode::Tab);
+        let s = screen(&mut app, 80, 24);
+        assert!(has(&s, "Letters:  C _ A _ E") && !has(&s, "One more") && has(&s, " Esc Back "), "{s:#?}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn the_collection_shows_a_word_with_its_stars_and_meaning() {
+        let (mut app, dir) = app("words");
+        app.modal = Modal::Words;
+        assert!(has(&screen(&mut app, 80, 24), "No words yet. Finish a game and"));
+        for (word, stars) in [("crane", "2"), ("skein", "0"), ("about", "3")] {
+            app.learned.insert(word.to_string(), stars.to_string());
+        }
+        let s = screen(&mut app, 80, 24);
+        assert!(has(&s, "MY WORDS · 1 of 3") && has(&s, "ABOUT  ★★★"), "{s:#?}");
+        press(&mut app, KeyCode::Right);
+        let s = screen(&mut app, 80, 24);
+        assert!(has(&s, "MY WORDS · 2 of 3") && has(&s, "CRANE  ★★☆") && has(&s, "machine that lifts"), "{s:#?}");
+        press(&mut app, KeyCode::Right);
+        assert!(has(&screen(&mut app, 80, 24), "SKEIN  ☆☆☆"));
+        // A card that is past the end, should the file have shrunk, shows the last word.
+        app.card = 40;
+        assert!(has(&screen(&mut app, 80, 24), "MY WORDS · 3 of 3"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn confetti_falls_over_everything_but_text() {
+        let (mut app, dir) = app("confetti");
+        app.game.add_guess(game::word("CRANE").unwrap());
+        let plain = buffer(&mut app, 120, 40);
+        app.confetti = Some(app.now);
+        app.now += Duration::from_millis(1300);
+        let party = buffer(&mut app, 120, 40);
+        let (colors, _) = app.theme.party();
+        let is_party = |c: Color| colors.iter().any(|p| p.fg == c);
+        let mut pieces = 0;
+        for y in 0..40 {
+            for x in 0..120 {
+                let (before, after) = (&plain[(x, y)], &party[(x, y)]);
+                if before == after {
+                    continue;
+                }
+                pieces += 1;
+                assert!(matches!(before.symbol(), " " | "▀" | "▄"), "confetti over {:?} at {x},{y}", before.symbol());
+                assert!(is_party(after.fg) || is_party(after.bg), "{x},{y}");
+                assert!(y < 39, "confetti on the footer");
+            }
+        }
+        assert!(pieces >= 20, "only {pieces} cells of confetti");
+        // When its time is up there is none left, and nothing still moving.
+        app.now += CONFETTI;
+        assert!(buffer(&mut app, 120, 40) == plain);
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -814,34 +1107,44 @@ mod tests {
     #[test]
     fn clicks_land_on_what_is_drawn_there() {
         let (mut app, dir) = app("clicks");
-        let s = screen(&mut app, 80, 24);
-        let find = |text: &str| {
-            let (y, row) = s.iter().enumerate().find(|(_, row)| row.contains(text)).unwrap();
+        let find = |s: &[String], text: &str| {
+            let (y, row) = s.iter().enumerate().find(|(_, row)| row.contains(text)).unwrap_or_else(|| panic!("no {text:?} on screen"));
             (row[..row.find(text).unwrap()].chars().count() as i32, y as i32)
         };
-        let (x, y) = find("Q   W");
+        let s = screen(&mut app, 80, 24);
+        let (x, y) = find(&s, "Q   W");
         assert_eq!(action_at(&app, x, y), Some(Action::Key(KeyId::Letter(b'Q'))));
         assert_eq!(action_at(&app, x + 4, y), Some(Action::Key(KeyId::Letter(b'W'))));
-        let (x, y) = find("⌫");
+        let (x, y) = find(&s, "⌫");
         assert_eq!(action_at(&app, x, y), Some(Action::Key(KeyId::Back)));
-        let (x, y) = find("↵");
+        let (x, y) = find(&s, "↵");
         assert_eq!(action_at(&app, x, y), Some(Action::Key(KeyId::Enter)));
-        let (x, y) = find("^G Give up");
+        let (x, y) = find(&s, "^G Reveal");
         assert_eq!(action_at(&app, x + 5, y), Some(Action::GiveUp));
+        let (x, y) = find(&s, "Tab Hint");
+        assert_eq!(action_at(&app, x + 5, y), Some(Action::Hint));
         assert_eq!(action_at(&app, 0, 0), None);
 
         // With a dialog open, only its buttons can be pressed.
         app.modal = Modal::GiveUp;
         let s = screen(&mut app, 80, 24);
-        let find = |text: &str| {
-            let (y, row) = s.iter().enumerate().find(|(_, row)| row.contains(text)).unwrap();
-            (row[..row.find(text).unwrap()].chars().count() as i32, y as i32)
-        };
-        let (x, y) = find(" Enter Give up ");
+        let (x, y) = find(&s, " Enter Show it ");
         assert_eq!(action_at(&app, x + 1, y), Some(Action::Surrender));
-        let (x, y) = find(" Esc Keep playing ");
+        let (x, y) = find(&s, " Esc Keep playing ");
         assert_eq!(action_at(&app, x + 3, y), Some(Action::Close));
         assert_eq!(action_at(&app, 0, 23), None);
+        for (modal, button, action) in
+            [(Modal::Hint, " Tab One more ", Action::Hint), (Modal::Stats, " W Words ", Action::Words), (Modal::Words, " Esc Close ", Action::Close)]
+        {
+            app.modal = modal;
+            let s = screen(&mut app, 80, 24);
+            let (x, y) = find(&s, button);
+            assert_eq!(action_at(&app, x + 2, y), Some(action), "{modal:?}");
+        }
+        app.learned.insert("crane".to_string(), "3".to_string());
+        let s = screen(&mut app, 80, 24);
+        let (x, y) = find(&s, " > Next ");
+        assert_eq!(action_at(&app, x + 2, y), Some(Action::CardNext));
         let _ = std::fs::remove_dir_all(dir);
     }
 }
