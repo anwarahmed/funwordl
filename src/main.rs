@@ -45,11 +45,14 @@ Usage:
 Options:
   -p, --practice            start with a new random word (default)
   -d, --daily               start with today's puzzle
-  -t, --theme NAME          candy, sky, paper, daylight, midnight, neon, contrast, ocean,
-                            ember or terminal
+  -t, --theme NAME          bright: candy, coral, cherry, ruby, sunset, lemon, mint,
+                            meadow, sage, lavender, orchid, grape, sky, paper, daylight
+                            dark: midnight, neon, contrast, ocean, ember
+                            or terminal, which follows your terminal's colors
       --easy                eight guesses, and hints with Tab
-      --normal              six guesses; any dictionary word is a valid guess (default)
-      --hard                green letters stay fixed, yellow letters must be reused
+      --normal              six guesses, and hints with Tab (default)
+      --hard                no hints; green letters stay fixed, yellow letters must
+                            be reused
       --ultra               ultra hard: also, yellow letters must move to another
                             spot and gray letters may not be played again
       --no-animation        skip the tile animations and the confetti

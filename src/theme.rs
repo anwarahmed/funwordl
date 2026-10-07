@@ -78,7 +78,10 @@ pub struct Theme {
 /// The theme a new player gets: a bright one.
 pub const DEFAULT: &str = "candy";
 
-pub const NAMES: [&str; 10] = ["midnight", "daylight", "neon", "contrast", "ocean", "ember", "paper", "sky", "candy", "terminal"];
+pub const NAMES: [&str; 21] = [
+    "midnight", "daylight", "neon", "contrast", "ocean", "ember", "paper", "sky", "candy", "coral", "cherry", "ruby", "sunset", "lemon", "mint", "meadow",
+    "sage", "lavender", "orchid", "grape", "terminal",
+];
 
 /// The nearest of the 6x6x6 color cube and the 24-step gray ramp.
 fn nearest_256(r: u8, g: u8, b: u8) -> Color {
@@ -191,6 +194,9 @@ impl Theme {
 
 /// The colors of the title's letters and of the confetti: the same cheerful eight in
 /// every theme, as red, green and blue.
+/// Stand-ins for party colors that a theme's background would swallow: dark ones, which
+/// show on any bright screen and take the same white letter.
+const STAND_INS: [(u8, u8, u8); 4] = [(38, 70, 83), (88, 52, 130), (22, 108, 98), (150, 62, 24)];
 const PARTY: [(u8, u8, u8); 8] = [(226, 68, 92), (238, 125, 38), (214, 158, 18), (58, 170, 95), (26, 166, 178), (60, 120, 230), (140, 90, 220), (226, 88, 168)];
 
 impl Theme {
@@ -206,8 +212,37 @@ impl Theme {
             let color = if self.truecolor { Color::Rgb(r, g, b) } else { nearest_256(r, g, b) };
             Paint { fg: color, bg: color, rgb: Some((r, g, b)) }
         };
-        (PARTY.map(paint), paint((255, 255, 255)))
+        // A party color that is nearly the screen's own (red on a red theme) would
+        // vanish, as a title letter and as confetti: a stand-in takes its place.
+        let screen = self.bg.rgb.unwrap_or((0, 0, 0));
+        let mut spare = STAND_INS.into_iter().filter(|&c| !near(c, screen)).cycle();
+        let colors = PARTY.map(|c| if near(c, screen) { spare.next().unwrap_or(c) } else { c });
+        (colors.map(paint), paint((255, 255, 255)))
     }
+}
+
+/// Whether two colors are too alike to tell one from the other at a glance.
+fn near(a: (u8, u8, u8), b: (u8, u8, u8)) -> bool {
+    let d = |x: u8, y: u8| (x as i32 - y as i32).pow(2);
+    d(a.0, b.0) + d(a.1, b.1) + d(a.2, b.2) < 80 * 80
+}
+
+/// The hue of a color in degrees: 0 red, 60 yellow, 120 green, 240 blue.
+#[cfg(test)]
+fn hue((r, g, b): (u8, u8, u8)) -> f32 {
+    let (r, g, b) = (r as f32, g as f32, b as f32);
+    let (max, min) = (r.max(g).max(b), r.min(g).min(b));
+    if max == min {
+        return 0.0;
+    }
+    let h = if max == r {
+        (g - b) / (max - min)
+    } else if max == g {
+        2.0 + (b - r) / (max - min)
+    } else {
+        4.0 + (r - g) / (max - min)
+    };
+    (h * 60.0).rem_euclid(360.0)
 }
 
 /// How bright a color looks, from 0 to 255; 128 when it is not known.
@@ -348,78 +383,353 @@ pub fn theme(name: &str, truecolor: bool) -> Theme {
         // The bright ones: a colored page instead of a dark screen.
         "paper" => from_rgb("paper", truecolor, [
         (246, 238, 214), // bg
-        (60, 46, 34), // fg
-        (140, 122, 100), // dim
-        (212, 198, 170), // empty
-        (130, 112, 90), // typed
-        (92, 150, 74), // g
-        (212, 150, 36), // y
-        (140, 126, 108), // x
-        (150, 206, 120), // win
-        (255, 252, 244), // gfg
-        (255, 252, 244), // yfg
-        (255, 252, 244), // xfg
-        (222, 208, 180), // key
-        (60, 46, 34), // keyfg
-        (140, 126, 108), // keyx
-        (236, 226, 206), // keyxfg
-        (176, 84, 44), // accent
-        (252, 246, 230), // panel
-        (176, 84, 44), // panelb
-        (60, 46, 34), // toast
-        (246, 238, 214), // toastfg
-        (176, 84, 44), // btn
-        (255, 250, 240), // btnfg
+        (46, 48, 72), // fg
+        (128, 124, 118), // dim
+        (214, 208, 184), // empty
+        (96, 100, 132), // typed
+        (78, 140, 110), // g
+        (228, 164, 72), // y
+        (132, 130, 138), // x
+        (150, 206, 176), // win
+        (255, 255, 255), // gfg
+        (46, 48, 72), // yfg
+        (255, 255, 255), // xfg
+        (226, 220, 196), // key
+        (46, 48, 72), // keyfg
+        (170, 166, 160), // keyx
+        (240, 236, 220), // keyxfg
+        (190, 84, 58), // accent
+        (252, 250, 240), // panel
+        (224, 122, 95), // panelb
+        (61, 64, 91), // toast
+        (244, 241, 222), // toastfg
+        (212, 104, 78), // btn
+        (255, 255, 255), // btnfg
         ]),
         "sky" => from_rgb("sky", truecolor, [
-        (176, 216, 248), // bg
-        (16, 40, 72), // fg
-        (64, 98, 140), // dim
-        (128, 176, 220), // empty
-        (56, 96, 144), // typed
-        (36, 150, 84), // g
-        (232, 160, 20), // y
-        (92, 116, 146), // x
-        (110, 214, 150), // win
+        (160, 212, 238), // bg
+        (2, 48, 71), // fg
+        (40, 98, 128), // dim
+        (110, 176, 208), // empty
+        (33, 118, 150), // typed
+        (30, 150, 96), // g
+        (255, 183, 3), // y
+        (104, 116, 128), // x
+        (120, 220, 160), // win
         (255, 255, 255), // gfg
-        (255, 255, 255), // yfg
+        (2, 48, 71), // yfg
         (255, 255, 255), // xfg
-        (232, 243, 253), // key
-        (16, 40, 72), // keyfg
-        (110, 146, 186), // keyx
-        (200, 224, 246), // keyxfg
-        (20, 84, 190), // accent
-        (236, 246, 255), // panel
-        (20, 84, 190), // panelb
-        (16, 40, 72), // toast
-        (236, 246, 255), // toastfg
-        (20, 84, 190), // btn
-        (255, 255, 255), // btnfg
+        (255, 243, 214), // key
+        (2, 48, 71), // keyfg
+        (118, 170, 198), // keyx
+        (214, 236, 248), // keyxfg
+        (196, 88, 0), // accent
+        (255, 250, 238), // panel
+        (251, 133, 0), // panelb
+        (2, 48, 71), // toast
+        (255, 246, 226), // toastfg
+        (251, 133, 0), // btn
+        (2, 40, 60), // btnfg
         ]),
         "candy" => from_rgb("candy", truecolor, [
         (255, 206, 226), // bg
-        (72, 20, 52), // fg
-        (158, 90, 126), // dim
-        (232, 160, 192), // empty
-        (150, 70, 112), // typed
+        (60, 22, 58), // fg
+        (150, 84, 124), // dim
+        (232, 160, 196), // empty
+        (88, 112, 190), // typed
         (30, 160, 110), // g
         (240, 160, 20), // y
-        (150, 110, 134), // x
+        (140, 124, 136), // x
         (120, 226, 176), // win
         (255, 255, 255), // gfg
         (255, 255, 255), // yfg
         (255, 255, 255), // xfg
-        (255, 240, 247), // key
-        (72, 20, 52), // keyfg
-        (196, 140, 168), // keyx
-        (250, 222, 236), // keyxfg
-        (200, 30, 120), // accent
-        (255, 244, 249), // panel
-        (200, 30, 120), // panelb
-        (72, 20, 52), // toast
-        (255, 236, 245), // toastfg
-        (200, 30, 120), // btn
+        (236, 245, 255), // key
+        (24, 44, 96), // keyfg
+        (200, 150, 180), // keyx
+        (250, 226, 240), // keyxfg
+        (36, 99, 214), // accent
+        (246, 250, 255), // panel
+        (58, 134, 255), // panelb
+        (24, 44, 96), // toast
+        (236, 244, 255), // toastfg
+        (42, 110, 224), // btn
         (255, 255, 255), // btnfg
+        ]),
+        "coral" => from_rgb("coral", truecolor, [
+        (255, 160, 137), // bg
+        (28, 36, 54), // fg
+        (122, 58, 52), // dim
+        (232, 128, 108), // empty
+        (120, 44, 44), // typed
+        (30, 136, 92), // g
+        (255, 221, 120), // y
+        (112, 100, 104), // x
+        (80, 200, 140), // win
+        (255, 255, 255), // gfg
+        (28, 36, 54), // yfg
+        (255, 255, 255), // xfg
+        (255, 240, 224), // key
+        (28, 36, 54), // keyfg
+        (224, 130, 112), // keyx
+        (255, 226, 216), // keyxfg
+        (18, 70, 110), // accent
+        (255, 246, 236), // panel
+        (0, 128, 128), // panelb
+        (28, 36, 54), // toast
+        (255, 240, 224), // toastfg
+        (0, 128, 128), // btn
+        (255, 255, 255), // btnfg
+        ]),
+        "cherry" => from_rgb("cherry", truecolor, [
+        (255, 107, 107), // bg
+        (20, 30, 40), // fg
+        (110, 24, 36), // dim
+        (226, 82, 86), // empty
+        (120, 24, 36), // typed
+        (22, 122, 82), // g
+        (255, 230, 109), // y
+        (110, 92, 96), // x
+        (90, 210, 150), // win
+        (255, 255, 255), // gfg
+        (26, 83, 92), // yfg
+        (255, 244, 244), // xfg
+        (247, 255, 247), // key
+        (26, 83, 92), // keyfg
+        (228, 90, 94), // keyx
+        (255, 200, 200), // keyxfg
+        (18, 62, 70), // accent
+        (247, 255, 247), // panel
+        (26, 83, 92), // panelb
+        (26, 83, 92), // toast
+        (247, 255, 247), // toastfg
+        (78, 205, 196), // btn
+        (16, 60, 66), // btnfg
+        ]),
+        "ruby" => from_rgb("ruby", truecolor, [
+        (224, 82, 96), // bg
+        (255, 246, 240), // fg
+        (255, 190, 190), // dim
+        (246, 130, 138), // empty
+        (255, 214, 214), // typed
+        (26, 134, 86), // g
+        (255, 214, 102), // y
+        (92, 80, 84), // x
+        (80, 200, 140), // win
+        (255, 255, 255), // gfg
+        (70, 16, 28), // yfg
+        (244, 236, 236), // xfg
+        (255, 236, 230), // key
+        (70, 16, 28), // keyfg
+        (190, 62, 78), // keyx
+        (255, 176, 180), // keyxfg
+        (255, 214, 102), // accent
+        (92, 20, 36), // panel
+        (255, 214, 102), // panelb
+        (255, 246, 240), // toast
+        (120, 20, 40), // toastfg
+        (255, 214, 102), // btn
+        (70, 16, 28), // btnfg
+        ]),
+        "sunset" => from_rgb("sunset", truecolor, [
+        (244, 162, 97), // bg
+        (30, 58, 70), // fg
+        (120, 66, 30), // dim
+        (222, 138, 72), // empty
+        (130, 70, 30), // typed
+        (46, 148, 100), // g
+        (246, 214, 130), // y
+        (122, 112, 106), // x
+        (96, 204, 150), // win
+        (255, 255, 255), // gfg
+        (30, 58, 70), // yfg
+        (255, 255, 255), // xfg
+        (255, 240, 214), // key
+        (30, 58, 70), // keyfg
+        (226, 140, 80), // keyx
+        (255, 228, 196), // keyxfg
+        (38, 70, 83), // accent
+        (255, 246, 230), // panel
+        (42, 157, 143), // panelb
+        (38, 70, 83), // toast
+        (255, 240, 214), // toastfg
+        (231, 111, 81), // btn
+        (255, 255, 255), // btnfg
+        ]),
+        "lemon" => from_rgb("lemon", truecolor, [
+        (255, 243, 176), // bg
+        (84, 11, 14), // fg
+        (130, 112, 60), // dim
+        (226, 208, 130), // empty
+        (150, 128, 60), // typed
+        (74, 140, 88), // g
+        (224, 159, 62), // y
+        (146, 142, 128), // x
+        (130, 200, 140), // win
+        (255, 255, 255), // gfg
+        (255, 255, 255), // yfg
+        (255, 255, 255), // xfg
+        (196, 220, 226), // key
+        (30, 60, 70), // keyfg
+        (214, 200, 140), // keyx
+        (255, 255, 255), // keyxfg
+        (51, 92, 103), // accent
+        (255, 252, 236), // panel
+        (51, 92, 103), // panelb
+        (51, 92, 103), // toast
+        (255, 243, 176), // toastfg
+        (158, 42, 43), // btn
+        (255, 255, 255), // btnfg
+        ]),
+        "mint" => from_rgb("mint", truecolor, [
+        (183, 228, 199), // bg
+        (27, 67, 50), // fg
+        (70, 120, 96), // dim
+        (140, 200, 166), // empty
+        (64, 145, 108), // typed
+        (45, 106, 79), // g
+        (240, 170, 40), // y
+        (120, 134, 128), // x
+        (116, 198, 157), // win
+        (255, 255, 255), // gfg
+        (255, 255, 255), // yfg
+        (255, 255, 255), // xfg
+        (255, 240, 246), // key
+        (27, 67, 50), // keyfg
+        (150, 196, 170), // keyx
+        (226, 246, 234), // keyxfg
+        (190, 44, 104), // accent
+        (250, 255, 251), // panel
+        (214, 64, 120), // panelb
+        (27, 67, 50), // toast
+        (236, 250, 240), // toastfg
+        (214, 64, 120), // btn
+        (255, 255, 255), // btnfg
+        ]),
+        "meadow" => from_rgb("meadow", truecolor, [
+        (176, 224, 132), // bg
+        (30, 50, 20), // fg
+        (78, 112, 50), // dim
+        (140, 196, 96), // empty
+        (70, 120, 50), // typed
+        (34, 120, 70), // g
+        (226, 140, 20), // y
+        (116, 122, 112), // x
+        (90, 200, 120), // win
+        (255, 255, 255), // gfg
+        (255, 255, 255), // yfg
+        (255, 255, 255), // xfg
+        (250, 240, 255), // key
+        (60, 30, 90), // keyfg
+        (150, 200, 116), // keyx
+        (232, 248, 214), // keyxfg
+        (110, 50, 160), // accent
+        (252, 248, 255), // panel
+        (140, 80, 190), // panelb
+        (50, 30, 80), // toast
+        (240, 232, 255), // toastfg
+        (130, 70, 190), // btn
+        (255, 255, 255), // btnfg
+        ]),
+        "sage" => from_rgb("sage", truecolor, [
+        (204, 213, 174), // bg
+        (52, 58, 40), // fg
+        (110, 116, 84), // dim
+        (170, 182, 138), // empty
+        (120, 110, 80), // typed
+        (88, 129, 87), // g
+        (221, 161, 94), // y
+        (130, 128, 116), // x
+        (140, 190, 130), // win
+        (255, 255, 255), // gfg
+        (255, 255, 255), // yfg
+        (255, 255, 255), // xfg
+        (254, 250, 224), // key
+        (52, 58, 40), // keyfg
+        (178, 188, 150), // keyx
+        (240, 244, 222), // keyxfg
+        (170, 92, 28), // accent
+        (254, 250, 224), // panel
+        (221, 161, 94), // panelb
+        (40, 54, 24), // toast
+        (254, 250, 224), // toastfg
+        (188, 108, 37), // btn
+        (255, 255, 255), // btnfg
+        ]),
+        "lavender" => from_rgb("lavender", truecolor, [
+        (224, 187, 228), // bg
+        (50, 30, 70), // fg
+        (116, 84, 140), // dim
+        (196, 152, 204), // empty
+        (120, 90, 150), // typed
+        (60, 150, 110), // g
+        (232, 150, 20), // y
+        (134, 128, 144), // x
+        (120, 214, 160), // win
+        (255, 255, 255), // gfg
+        (255, 255, 255), // yfg
+        (255, 255, 255), // xfg
+        (255, 223, 211), // key
+        (50, 30, 70), // keyfg
+        (196, 160, 206), // keyx
+        (244, 226, 246), // keyxfg
+        (120, 64, 160), // accent
+        (253, 246, 255), // panel
+        (149, 125, 173), // panelb
+        (50, 30, 70), // toast
+        (253, 240, 255), // toastfg
+        (240, 180, 60), // btn
+        (50, 30, 70), // btnfg
+        ]),
+        "orchid" => from_rgb("orchid", truecolor, [
+        (214, 148, 214), // bg
+        (48, 16, 60), // fg
+        (112, 56, 120), // dim
+        (188, 116, 190), // empty
+        (110, 50, 120), // typed
+        (30, 146, 96), // g
+        (255, 214, 90), // y
+        (128, 118, 134), // x
+        (90, 214, 170), // win
+        (255, 255, 255), // gfg
+        (48, 16, 60), // yfg
+        (255, 255, 255), // xfg
+        (236, 255, 240), // key
+        (30, 70, 50), // keyfg
+        (190, 124, 194), // keyx
+        (248, 220, 248), // keyxfg
+        (16, 100, 82), // accent
+        (250, 244, 252), // panel
+        (20, 140, 110), // panelb
+        (48, 16, 60), // toast
+        (248, 232, 250), // toastfg
+        (20, 140, 110), // btn
+        (255, 255, 255), // btnfg
+        ]),
+        "grape" => from_rgb("grape", truecolor, [
+        (124, 77, 170), // bg
+        (250, 244, 255), // fg
+        (214, 190, 240), // dim
+        (160, 116, 204), // empty
+        (224, 200, 246), // typed
+        (40, 170, 120), // g
+        (255, 210, 80), // y
+        (176, 168, 190), // x
+        (110, 230, 170), // win
+        (255, 255, 255), // gfg
+        (50, 24, 80), // yfg
+        (50, 24, 80), // xfg
+        (240, 230, 255), // key
+        (50, 24, 80), // keyfg
+        (98, 58, 140), // keyx
+        (190, 160, 220), // keyxfg
+        (255, 210, 80), // accent
+        (48, 24, 80), // panel
+        (255, 210, 80), // panelb
+        (250, 244, 255), // toast
+        (70, 30, 110), // toastfg
+        (255, 210, 80), // btn
+        (50, 24, 80), // btnfg
         ]),
         "terminal" => terminal(),
         _ => from_rgb("midnight", truecolor, [
@@ -497,6 +807,37 @@ mod tests {
             for (what, block) in [("green", th.g), ("yellow", th.y), ("gray", th.x), ("key", th.key), ("frame", th.empty)] {
                 assert!(block.rgb != th.bg.rgb && brightness(block).abs_diff(brightness(th.bg)) >= 15, "{name}: {what} on the screen");
             }
+        }
+    }
+
+    /// The title and the confetti must show on every background, the red ones too.
+    #[test]
+    fn party_colors_stand_out_from_the_screen() {
+        for name in NAMES.into_iter().filter(|name| *name != "terminal") {
+            let th = theme(name, true);
+            let (party, ink) = th.party();
+            for paint in party {
+                assert!(!near(paint.rgb.unwrap(), th.bg.rgb.unwrap()), "{name}: {:?} on {:?}", paint.rgb, th.bg.rgb);
+                assert!(brightness(ink).abs_diff(brightness(paint)) >= 60, "{name}: a title letter on {:?}", paint.rgb);
+            }
+        }
+        // Where nothing clashes, they are the eight as listed.
+        assert_eq!(theme("midnight", true).party().0.map(|p| p.rgb.unwrap()), PARTY);
+    }
+
+    /// Whatever the background, the three clues keep their meaning by color: right spot
+    /// is a green, wrong spot a yellow or an orange, not in the word a gray. Only
+    /// `contrast` differs, on purpose: orange and blue, for color-blind players.
+    #[test]
+    fn clue_colors_are_green_yellow_and_gray_in_every_theme() {
+        for name in NAMES.into_iter().filter(|name| !["terminal", "contrast"].contains(name)) {
+            let th = theme(name, true);
+            let (g, y, x) = (th.g.rgb.unwrap(), th.y.rgb.unwrap(), th.x.rgb.unwrap());
+            assert!((100.0..=165.0).contains(&hue(g)), "{name}: green is at {}", hue(g));
+            assert!((25.0..=60.0).contains(&hue(y)), "{name}: yellow is at {}", hue(y));
+            let spread = x.0.max(x.1).max(x.2) - x.0.min(x.1).min(x.2);
+            // A gray may lean towards its theme (the dark themes' do), but not far.
+            assert!(spread <= 60, "{name}: gray has too much color in it ({spread})");
         }
     }
 

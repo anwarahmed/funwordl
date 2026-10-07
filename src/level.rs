@@ -1,5 +1,6 @@
-//! The four levels. Easy has more guesses, and hints. The other three are wordl's
-//! difficulties, unchanged, and the game starts on the first of them, Normal.
+//! The four levels. Easy has more guesses; Easy and Normal have hints. Normal, Hard
+//! and Ultra Hard hold a guess to the clues as wordl's three difficulties do, and the
+//! game starts on Normal.
 
 use crate::game::{Difficulty, Game, TRIES};
 
@@ -12,7 +13,7 @@ pub const MAX_HINTS: usize = 4;
 pub enum Level {
     /// Eight guesses, hints on request, and a word that is not solved costs nothing.
     Easy,
-    /// Six guesses; any dictionary word is a valid guess.
+    /// Six guesses and hints; any dictionary word is a valid guess.
     Normal,
     /// Green letters stay where they are, yellow letters are reused.
     Hard,
@@ -44,6 +45,11 @@ impl Level {
 
     pub fn tries(self) -> usize {
         if self == Self::Easy { EASY_TRIES } else { TRIES }
+    }
+
+    /// Whether hints can be asked for. The two hard levels are played without.
+    pub fn hints(self) -> bool {
+        matches!(self, Self::Easy | Self::Normal)
     }
 
     /// Which clues a guess is held to.
@@ -89,6 +95,7 @@ mod tests {
         assert_eq!(Level::Easy.next(), Level::Normal);
         assert_eq!(Level::Ultra.next(), Level::Easy);
         assert_eq!((Level::Easy.tries(), Level::Normal.tries(), Level::Ultra.tries()), (8, 6, 6));
+        assert_eq!(Level::ALL.map(Level::hints), [true, true, false, false]);
         for level in Level::ALL {
             let mut game = Game::new(Mode::Practice, 0, word("CRANE").unwrap(), Difficulty::Normal);
             level.apply(&mut game);

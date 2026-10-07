@@ -260,7 +260,7 @@ impl App {
 
     /// Whether another hint can be had.
     pub fn more_hints(&self) -> bool {
-        self.game.playing() && Level::of(&self.game) == Level::Easy && self.hints < MAX_HINTS && (self.hints == 0 || self.next_hint_spot().is_some())
+        self.game.playing() && Level::of(&self.game).hints() && self.hints < MAX_HINTS && (self.hints == 0 || self.next_hint_spot().is_some())
     }
 
     /// The first hint is what the word means; each one after that gives a letter.
@@ -568,8 +568,8 @@ impl App {
                 if !self.game.playing() || self.small() {
                     return;
                 }
-                if Level::of(&self.game) != Level::Easy {
-                    return self.toast("Hints are for Easy (^X)", MessageKind::Plain, 3);
+                if !Level::of(&self.game).hints() {
+                    return self.toast("Hints are for Easy and Normal", MessageKind::Plain, 3);
                 }
                 // Opening the dialog again only shows what was already given; asking
                 // from inside it is what takes another hint.
@@ -842,10 +842,25 @@ mod tests {
         assert_eq!(app.game.status, Status::Lost);
         // Counted as played, and the run is over.
         assert_eq!((app.stats.of(Mode::Practice, "played"), app.stats.of(Mode::Practice, "wins"), app.stats.of(Mode::Practice, "streak")), (2, 1, 0));
-        // No hints here.
+        // Normal has hints, at the same price in stars as on Easy.
         app.act(Action::New);
         app.on_key(key(KeyCode::Tab));
-        assert_eq!((app.modal, app.hints, message(&app)), (Modal::None, 0, "Hints are for Easy (^X)"));
+        assert_eq!((app.modal, app.hints, app.stars()), (Modal::Hint, 1, 2));
+        app.on_key(key(KeyCode::Tab));
+        assert_eq!((app.hints, app.hint_letters.len(), app.stars()), (2, 1, 1));
+        app.on_key(key(KeyCode::Esc));
+        // With a hint taken the game cannot be made harder, only the next one.
+        app.on_key(ctrl('x'));
+        assert_eq!((app.chosen, Level::of(&app.game), message(&app)), (Level::Hard, Level::Normal, "Hard starts next game"));
+        type_word(&mut app, "crane");
+        assert!(app.share_text().starts_with("Funwordl practice 1/6 ★ (Normal)\n"), "{}", app.share_text());
+        // Hard and Ultra Hard are played without.
+        for level in [Level::Hard, Level::Ultra] {
+            app.chosen = level;
+            app.act(Action::New);
+            app.on_key(key(KeyCode::Tab));
+            assert_eq!((app.modal, app.hints, message(&app)), (Modal::None, 0, "Hints are for Easy and Normal"), "{level:?}");
+        }
         let _ = std::fs::remove_dir_all(dir);
     }
 
