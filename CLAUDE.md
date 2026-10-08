@@ -91,13 +91,23 @@ Single binary crate, no async. One file per concern in `src/`:
 
 ### What is funwordl's own
 
-- **Levels are a thin layer over wordl's rules** (`level.rs`). A `Level` is a
-  `Difficulty` plus a number of guesses: Easy is `Difficulty::Normal` with eight,
-  the others are wordl's three with six. `Level::hints` says which have hints: Easy
-  and Normal. Nothing else is stored: `Level::of(&game)`
-  reads the level back from the game (more than six guesses means Easy), which is why
-  the saved daily puzzle needs no new field. The chosen level is `level=0..3` in the
-  statistics file (0 is Easy); absent means `Level::DEFAULT`, which is Normal.
+- **Levels are a thin layer over wordl's rules** (`level.rs`). Every level has six
+  guesses. Normal, Hard and Ultra Hard are wordl's three difficulties. Easy plays by
+  Normal's clues (`Difficulty::Normal`) and differs in what the game checks before a
+  guess reaches the rules: `Level::any_letters`, so `App::submit` skips the
+  dictionary. `Level::hints` says which have hints: Easy and Normal. The chosen
+  level is `level=0..3` in the statistics file (0 is Easy); absent means
+  `Level::DEFAULT`, which is Normal.
+- **The level of the game under way is `App::level`**, not something read from the
+  game: Easy and Normal are the same to wordl's `Game`. For the daily puzzle it is
+  saved beside the game as `daily_level=<day>,<level>` in the statistics file
+  (`App::save_daily`; use that, never `stats.save_daily` directly), and believed on
+  loading only if it fits the saved game's clue rules. Without it `Level::of` reads
+  what it can from the game.
+- **Easy had eight guesses up to 0.1.2**, and an Easy game was recognized by that.
+  A daily puzzle left unfinished by such a version still loads as Easy with its
+  eight rows (`Level::of`), which is the only reason the board can still be drawn
+  with a number of rows other than six. No new game has eight.
 - **Easier at once, harder next game.** `Ctrl-X` goes Easy, Normal, Hard, Ultra Hard
   and round again. A game under way takes the new level only if it is easier or
   nothing has happened yet (no guess, no hint): earlier guesses were not held to
@@ -149,10 +159,10 @@ Single binary crate, no async. One file per concern in `src/`:
   so confetti never lands on text; it stops above the footer. The stars dialog waits
   for it (`CONFETTI`), and keys wait in the queue as for any animation.
   `FUNWORDL_NO_ANIM` and `--no-animation` skip it.
-- **The board has six or eight rows**, so everything that sizes or draws it takes
-  `game.tries`: `layout::layout`, `layout::min_rows` (12 or 14), the tile loop in
-  `ui::draw`. `ui::layout_for(app, ..)` is the one place that passes it. The layout
-  test sweeps every size for both.
+- **The board takes its number of rows from the game** (`game.tries`): six, or the
+  eight of an old saved Easy puzzle (above). `layout::layout`, `layout::min_rows`
+  (12 or 14) and the tile loop in `ui::draw` take it, and `ui::layout_for(app, ..)`
+  is the one place that passes it. The layout test sweeps every size for both.
 - **The title is eight letters** in the party colors (`Theme::party`: the same eight
   colors in every theme, the terminal's own six in `terminal`). It is wider than the
   board, so on a narrow terminal there is no room for it and the info line together
@@ -225,10 +235,14 @@ dialog lines of at most 35 characters, tests beside the code.
   after trying 0.1.0: "Start the game on normal difficulty"). 0.1.0 started on Easy, because the
   first request was for rules "easier by default, but have the option for more
   difficult levels". Only what an absent `level` means changed: a player who chose a
-  level, Easy included, keeps it. What Easy means was proposed by Claude and accepted
-  as part of "go ahead": eight guesses, hints, and no penalty for a word not solved.
-  The numbers (eight, four hints, three stars) are Claude's choices and have not been
-  played by a child yet.
+  level, Easy included, keeps it.
+- **Easy means: any five letters are a guess** (the user, 0.1.3: "Easy mode won't
+  have extra tries, but instead it will accept any combination of letters. Doesn't
+  have to be a word in our list"). Up to 0.1.2 Easy meant eight guesses, which was
+  Claude's proposal. What remains of that proposal on Easy is that a word not
+  solved costs nothing; the user has not asked for it or against it. Hints are on
+  Easy and Normal alike. The numbers (four hints, three stars) are Claude's choices
+  and have not been played by a child yet.
 - **Sounds, with a way to turn them off** (asked for by the user after trying 0.1.0;
   since 0.1.1).
   They are played by the system's own audio player, not by an audio library: a
@@ -287,7 +301,7 @@ dialog lines of at most 35 characters, tests beside the code.
 
 `cargo test` covers the levels, hints, stars, collection and which sounds are asked
 for when (`app.rs`, `level.rs`, `sound.rs`), the
-layout at every size for six and eight rows, and drawing every theme and dialog at a
+layout at every size for six and eight rows (eight only for old saved games), and drawing every theme and dialog at a
 dozen sizes into ratatui's `TestBackend`. `tests/e2e.sh` runs the built binary: the
 command line, `install.sh`, the updater against made-up releases, and the game in a
 detached tmux session with a hint, mouse clicks, the collection, a resize, giving up,
@@ -330,7 +344,7 @@ a key arrives as Alt+key; never test copying against the real clipboard).
 ## Known gaps and ideas
 
 - Not played by a child, or by any person, yet: everything was driven by Claude in
-  tmux. Whether eight guesses, four hints and the star rule feel right is unknown.
+  tmux. Whether four hints and the star rule feel right is unknown.
 - Never run by a person on a real Mac; CI runs the tests on a macOS runner.
 - The Intel macOS binary is cross-built and never executed in CI.
 - With twenty-one themes, `Ctrl-T` is a long walk round, and there is no way to pick
@@ -342,8 +356,8 @@ a key arrives as Alt+key; never test copying against the real clipboard).
 - Typing and the keys of the on-screen keyboard make no sound.
 - No mascot. A pixel-art character that reacts to guesses was among the ideas put to
   the user and is not built; the layout has no place reserved for one.
-- On Easy at 80x24 the tiles are one row high, because eight rows of the next size do
-  not fit; the other levels get wordl's three-row tiles there.
+- On Easy a guess of letters that make no word still fills a row and is scored, and
+  nothing tells a player who mistyped a real word that it was not one.
 - At 39 columns the title is plain colored letters, not tiles.
 - The collection is alphabetical and has no search; with hundreds of words, leafing
   one at a time will be slow.

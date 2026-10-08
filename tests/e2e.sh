@@ -170,10 +170,10 @@ else
     expect "game: help opens" "HOW TO PLAY"
     keys q
     expect "game: help closes" "Q   W   E   R   T"
+    # On Easy any five letters are a guess.
     keys -l qqqqq
     keys Enter
-    expect "game: rejects a non-word" "I don't know that word"
-    keys BSpace BSpace BSpace BSpace BSpace
+    expect "easy: letters that make no word are a guess" "Q      Q      Q      Q      Q"
     keys -l slate
     keys Enter
     # A hint: the meaning first, and one of the three stars goes.
@@ -187,9 +187,9 @@ else
     keys -l "$(printf '\033[<0;30;21M')"
     sleep 0.2
     keys -l "$(printf '\033[<0;58;23M')"
-    expect "game: mouse clicks type and submit; the game is won" "Solved in 2/8"
+    expect "game: mouse clicks type and submit; the game is won" "Solved in 3/6"
     expect "game: the stars open after a win" "YOU DID IT!"
-    expect "game: two stars, for the hint" "★★☆  Solved in 2/8"
+    expect "game: two stars, for the hint" "★★☆  Solved in 3/6"
     expect "game: the word's meaning is shown" "CRANE: a tall bird with long legs;"
     keys w
     expect "game: the word is in the collection" "MY WORDS · 1 of 1"
@@ -197,9 +197,9 @@ else
     keys Escape
     sleep 0.3
     tmux -L "$SOCK" resize-window -x 30 -y 8 2>/dev/null
-    expect "game: a tiny window says so" "funwordl needs 39x14"
+    expect "game: a tiny window says so" "funwordl needs 39x12"
     tmux -L "$SOCK" resize-window -x 150 -y 46 2>/dev/null
-    expect "game: a big window gets big tiles" "█       █  █       █  █       █"
+    expect "game: a big window gets big tiles" "█           █  █           █"
     keys C-q
     expect "game: quits cleanly" "EXIT=0"
     is "game: the win is saved" "practice_wins=1" "$(grep -x 'practice_wins=1' "$TMP/xdg/funwordl/stats" 2>/dev/null)"
@@ -209,6 +209,10 @@ else
     # Giving up: a question first, then the answer, then on to the next word.
     start "$TMP/xdg2" FUNWORDL_NO_ANIM=1 "'$BIN'" --ultra
     expect "give up: game starts" "Ultra Hard"
+    keys -l qqqqq
+    keys Enter
+    expect "the other levels want a real word" "I don't know that word"
+    keys BSpace BSpace BSpace BSpace BSpace
     keys -l slate
     keys Enter
     keys -l blaze

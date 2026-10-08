@@ -126,6 +126,8 @@ pub struct App {
     truecolor: bool,
     /// The level new games start with. A game under way keeps its own.
     pub chosen: Level,
+    /// The level of the game under way.
+    pub level: Level,
     /// Hints taken for this word: the first is its meaning, each one after it a letter.
     pub hints: usize,
     /// The spots (0 to 4) whose letters the hints have given away.
@@ -180,6 +182,7 @@ impl App {
             theme,
             truecolor: options.truecolor,
             chosen,
+            level: chosen,
             hints: 0,
             hint_letters: Vec::new(),
             learned,
@@ -210,12 +213,13 @@ impl App {
     pub fn new_game(&mut self, mode: Mode) {
         let day = today();
         let level = self.chosen;
-        let fresh = |answer| Game::new(mode, day, answer, level.difficulty()).with_tries(level.tries());
-        (self.hints, self.hint_letters) = (0, Vec::new());
+        let fresh = |answer| Game::new(mode, day, answer, level.difficulty());
+        (self.hints, self.hint_letters, self.level) = (0, Vec::new(), level);
         self.game = match mode {
             Mode::Daily => match self.stats.load_daily(day) {
                 Some(game) => {
                     self.load_hints(day);
+                    self.level = self.saved_daily_level(&game);
                     game
                 }
                 None => fresh(daily_answer(day)),
@@ -226,6 +230,35 @@ impl App {
         self.pending_stats = None;
         (self.reveal, self.shake, self.celebrate, self.confetti) = (None, None, None, None);
         self.end_message();
+    }
+
+    /// Saves the daily puzzle and, beside it, its level: Easy and Normal play by the
+    /// same clues, so the saved game alone cannot say which it was. Kept with the
+    /// statistics as `daily_level=<day>,<level>`.
+    fn save_daily(&mut self) {
+        if self.game.mode != Mode::Daily {
+            return;
+        }
+        self.stats.save_daily(&self.game);
+        self.stats.set("daily_level", format!("{},{}", self.game.day, self.level.index()));
+        self.stats.save();
+    }
+
+    fn saved_daily_level(&self, game: &Game) -> Level {
+        let saved: Vec<i64> = self.stats.text("daily_level").unwrap_or_default().split(',').filter_map(|v| v.parse().ok()).collect();
+        match saved.as_slice() {
+            // Only a level that plays by the saved game's clues is believed.
+            [day, level @ 0..=3] if *day == game.day && Level::from_index(*level as usize).difficulty() == game.difficulty => {
+                Level::from_index(*level as usize)
+            }
+            _ => Level::of(game),
+        }
+    }
+
+    /// Puts the game under way on another level.
+    pub fn set_level(&mut self, level: Level) {
+        self.level = level;
+        self.game.difficulty = level.difficulty();
     }
 
     /// The hints taken for the daily puzzle are kept with the statistics, as
@@ -260,7 +293,7 @@ impl App {
 
     /// Whether another hint can be had.
     pub fn more_hints(&self) -> bool {
-        self.game.playing() && Level::of(&self.game).hints() && self.hints < MAX_HINTS && (self.hints == 0 || self.next_hint_spot().is_some())
+        self.game.playing() && self.level.hints() && self.hints < MAX_HINTS && (self.hints == 0 || self.next_hint_spot().is_some())
     }
 
     /// The first hint is what the word means; each one after that gives a letter.
@@ -293,7 +326,7 @@ impl App {
     /// word goes into the collection, to be looked at again.
     fn finish(&mut self) {
         let won = self.game.status == Status::Won;
-        if won || Level::of(&self.game) != Level::Easy {
+        if won || self.level != Level::Easy {
             self.stats.record(&self.game);
         }
         let stars = if won { self.stars() } else { 0 };
@@ -447,7 +480,8 @@ impl App {
         let Some(guess) = game::word(&String::from_utf8_lossy(&self.game.cur)) else {
             return self.refuse("Type 5 letters first", 2);
         };
-        if !words::is_word(&game::text(&guess)) {
+        // On Easy any five letters will do: a guess is a way to try letters out.
+        if !self.level.any_letters() && !words::is_word(&game::text(&guess)) {
             return self.refuse("I don't know that word", 2);
         }
         if let Err(why) = game::check_clues(self.game.difficulty, &self.game.guesses, &self.game.marks, &guess) {
@@ -456,7 +490,7 @@ impl App {
         self.clear_toast();
         self.game.cur.clear();
         self.game.add_guess(guess);
-        self.stats.save_daily(&self.game);
+        self.save_daily();
         if !self.game.playing() {
             self.finish();
         }
@@ -489,7 +523,7 @@ impl App {
         if won {
             text.push_str(&format!(" {}", "★".repeat(self.stars())));
         }
-        let level = Level::of(game);
+        let level = self.level;
         if level != Level::Easy {
             text.push_str(&format!(" ({})", level.name()));
         }
@@ -535,12 +569,12 @@ impl App {
                     return;
                 }
                 // A game under way can be made easier, but not harder: its earlier
-                // guesses were not held to the stricter rules, and hints may have been
-                // taken.
+                // guesses were not held to the stricter rules (on Easy they need not
+                // even have been words), and hints may have been taken.
                 let untouched = self.game.guesses.is_empty() && self.hints == 0;
-                if self.chosen <= Level::of(&self.game) || untouched {
-                    self.chosen.apply(&mut self.game);
-                    self.stats.save_daily(&self.game);
+                if self.chosen <= self.level || untouched {
+                    self.set_level(self.chosen);
+                    self.save_daily();
                     self.toast(format!("Level: {}", self.chosen.name()), MessageKind::Plain, 2);
                 } else {
                     self.toast(format!("{} starts next game", self.chosen.name()), MessageKind::Plain, 3);
@@ -568,7 +602,7 @@ impl App {
                 if !self.game.playing() || self.small() {
                     return;
                 }
-                if !Level::of(&self.game).hints() {
+                if !self.level.hints() {
                     return self.toast("Hints are for Easy and Normal", MessageKind::Plain, 3);
                 }
                 // Opening the dialog again only shows what was already given; asking
@@ -603,7 +637,7 @@ impl App {
                 if self.game.playing() {
                     self.modal = Modal::None;
                     self.game.give_up();
-                    self.stats.save_daily(&self.game);
+                    self.save_daily();
                     self.finish();
                     self.end_sound();
                     self.after_guess();
@@ -761,8 +795,8 @@ mod tests {
 
     #[test]
     fn a_game_is_typed_refused_and_won() {
-        let (mut app, dir) = app("win");
-        assert_eq!((app.chosen, app.game.tries, app.theme.name), (Level::Easy, 8, theme::DEFAULT));
+        let (mut app, dir) = app_at("win", Some(Level::Normal));
+        assert_eq!((app.chosen, app.game.tries, app.theme.name), (Level::Normal, 6, theme::DEFAULT));
         // Left to itself the game starts on Normal, and remembers a level once chosen.
         let (fresh, fresh_dir) = app_at("win-default", None);
         assert_eq!((fresh.chosen, fresh.game.tries), (Level::Normal, 6));
@@ -780,7 +814,7 @@ mod tests {
         assert_eq!((app.game.guesses.len(), message(&app)), (1, ""));
         type_word(&mut app, "CRANE");
         assert_eq!(app.game.status, Status::Won);
-        assert_eq!(message(&app), "Magnificent! Solved in 2/8");
+        assert_eq!(message(&app), "Magnificent! Solved in 2/6");
         assert_eq!((app.stats.of(Mode::Practice, "wins"), app.stats.of(Mode::Practice, "d2"), app.stats.num("stars")), (1, 1, 3));
         assert_eq!(app.cards(), [("crane", 3)]);
         // Enter on a finished game opens the statistics, and more of it changes nothing:
@@ -810,14 +844,27 @@ mod tests {
     const WRONG: [&str; 8] = ["slate", "count", "world", "house", "mound", "plant", "brick", "jumpy"];
 
     #[test]
-    fn an_easy_game_has_eight_guesses_and_losing_it_costs_nothing() {
+    fn an_easy_game_takes_any_letters_and_losing_it_costs_nothing() {
         let (mut app, dir) = app("easy");
+        assert_eq!((app.level, app.game.tries), (Level::Easy, 6));
         type_word(&mut app, "crane");
         app.on_key(key(KeyCode::Enter));
         app.on_key(key(KeyCode::Char('n')));
         assert_eq!((app.stats.of(Mode::Practice, "played"), app.stats.of(Mode::Practice, "streak")), (1, 1));
-        for (i, word) in WRONG.iter().enumerate() {
-            assert_eq!(app.game.status, Status::Playing, "before guess {}", i + 1);
+        // Letters that make no word are a guess all the same, and are scored like one.
+        type_word(&mut app, "qqqqq");
+        type_word(&mut app, "aeiou");
+        assert_eq!((app.game.guesses.len(), message(&app)), (2, ""));
+        assert_eq!(app.game.marks[1][0], game::Mark::Yellow);
+        // Five letters are still needed.
+        type_word(&mut app, "cra");
+        assert_eq!((app.game.guesses.len(), message(&app)), (2, "Type 5 letters first"));
+        for _ in 0..3 {
+            app.on_key(key(KeyCode::Backspace));
+        }
+        // Six guesses, as on every level.
+        for word in &WRONG[..4] {
+            assert_eq!(app.game.status, Status::Playing);
             type_word(&mut app, word);
         }
         assert_eq!((app.game.status, message(&app)), (Status::Lost, "So close! It was CRANE"));
@@ -825,7 +872,14 @@ mod tests {
         assert_eq!((app.stats.of(Mode::Practice, "played"), app.stats.of(Mode::Practice, "streak"), app.stats.num("stars")), (1, 1, 3));
         // The stars a word earned are kept when it is met again and not solved.
         assert_eq!(app.cards(), [("crane", 3)]);
-        assert!(app.share_text().starts_with("Funwordl practice X/8\n\n⬛⬛🟩⬛🟩\n"), "{}", app.share_text());
+        assert!(app.share_text().starts_with("Funwordl practice X/6\n\n⬛⬛⬛⬛⬛\n"), "{}", app.share_text());
+        // Every other level wants a word.
+        for level in [Level::Normal, Level::Hard, Level::Ultra] {
+            app.chosen = level;
+            app.act(Action::New);
+            type_word(&mut app, "qqqqq");
+            assert_eq!((app.game.guesses.len(), message(&app)), (0, "I don't know that word"), "{level:?}");
+        }
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -851,7 +905,7 @@ mod tests {
         app.on_key(key(KeyCode::Esc));
         // With a hint taken the game cannot be made harder, only the next one.
         app.on_key(ctrl('x'));
-        assert_eq!((app.chosen, Level::of(&app.game), message(&app)), (Level::Hard, Level::Normal, "Hard starts next game"));
+        assert_eq!((app.chosen, app.level, message(&app)), (Level::Hard, Level::Normal, "Hard starts next game"));
         type_word(&mut app, "crane");
         assert!(app.share_text().starts_with("Funwordl practice 1/6 ★ (Normal)\n"), "{}", app.share_text());
         // Hard and Ultra Hard are played without.
@@ -886,7 +940,7 @@ mod tests {
         assert_eq!((app.modal, app.game.cur.len()), (Modal::None, 0));
         type_word(&mut app, "crane");
         assert_eq!((app.stats.num("stars"), app.cards()), (1, vec![("crane", 1)]));
-        assert!(app.share_text().starts_with("Funwordl practice 2/8 ★\n"));
+        assert!(app.share_text().starts_with("Funwordl practice 2/6 ★\n"));
         // The next word starts with no hints taken.
         app.act(Action::New);
         assert_eq!((app.hints, app.hint_letters.len(), app.stars()), (0, 0, 3));
@@ -899,17 +953,17 @@ mod tests {
         // Nothing done yet: any level takes effect at once.
         app.on_key(ctrl('x'));
         app.on_key(ctrl('x'));
-        assert_eq!((app.chosen, Level::of(&app.game), app.game.tries, message(&app)), (Level::Hard, Level::Hard, 6, "Level: Hard"));
+        assert_eq!((app.chosen, app.level, app.game.tries, message(&app)), (Level::Hard, Level::Hard, 6, "Level: Hard"));
         type_word(&mut app, "slate");
         type_word(&mut app, "count");
         assert_eq!(message(&app), "3rd letter must be A");
         app.on_key(ctrl('x'));
-        assert_eq!((app.chosen, Level::of(&app.game), message(&app)), (Level::Ultra, Level::Hard, "Ultra Hard starts next game"));
+        assert_eq!((app.chosen, app.level, message(&app)), (Level::Ultra, Level::Hard, "Ultra Hard starts next game"));
         // Round to Easy: easier, so at once, with its two extra guesses.
         app.on_key(ctrl('x'));
-        assert_eq!((app.chosen, Level::of(&app.game), app.game.tries), (Level::Easy, Level::Easy, 8));
+        assert_eq!((app.chosen, app.level, app.game.tries), (Level::Easy, Level::Easy, 6));
         app.on_key(ctrl('x'));
-        assert_eq!((app.chosen, Level::of(&app.game), message(&app)), (Level::Normal, Level::Easy, "Normal starts next game"));
+        assert_eq!((app.chosen, app.level, message(&app)), (Level::Normal, Level::Easy, "Normal starts next game"));
         // The choice is remembered, Easy too.
         assert_eq!(reopen(&dir, None).chosen, Level::Normal);
         app.on_key(ctrl('x'));
@@ -921,7 +975,7 @@ mod tests {
         app.on_key(key(KeyCode::Tab));
         app.on_key(key(KeyCode::Esc));
         app.on_key(ctrl('x'));
-        assert_eq!((app.chosen, Level::of(&app.game)), (Level::Normal, Level::Easy));
+        assert_eq!((app.chosen, app.level), (Level::Normal, Level::Easy));
         let _ = std::fs::remove_dir_all(dir);
         let _ = std::fs::remove_dir_all(dir2);
     }
@@ -953,7 +1007,7 @@ mod tests {
     fn the_daily_puzzle_keeps_its_guesses_hints_and_level() {
         let (mut app, dir) = app("daily");
         app.on_key(ctrl('d'));
-        assert_eq!((app.game.mode, app.game.tries), (Mode::Daily, 8));
+        assert_eq!((app.game.mode, app.game.tries, app.level), (Mode::Daily, 6, Level::Easy));
         assert_eq!(app.daily_number(), today() - DAILY_BASE);
         // Whatever today's word is, this is a valid first guess or the answer itself.
         type_word(&mut app, "slate");
@@ -965,13 +1019,35 @@ mod tests {
             // Another start of the game, even one that asks for a harder level.
             let mut app = reopen(&dir, Some(Level::Hard));
             app.on_key(ctrl('d'));
-            assert_eq!((app.game.guesses.len(), app.game.tries, Level::of(&app.game)), (1, 8, Level::Easy));
+            // Easy and Normal play by the same clues; the level is saved beside the game.
+            assert_eq!((app.game.guesses.len(), app.game.tries, app.level), (1, 6, Level::Easy));
             assert_eq!((app.hints, app.hint_letters.clone()), (2, letters));
             app.act(Action::Surrender);
             app.on_key(ctrl('n'));
             app.on_key(ctrl('d'));
             assert_eq!((app.game.status, app.game.gave_up, app.game.guesses.len()), (Status::Lost, true, 1));
         }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Up to 0.1.2 an Easy game had eight guesses and nothing else said it was Easy. One
+    /// left unfinished by that version is picked up as it was.
+    #[test]
+    fn an_eight_guess_daily_puzzle_from_an_older_version_is_still_easy() {
+        let (mut app, dir) = app_at("legacy", Some(Level::Normal));
+        let day = today();
+        let mut old = Game::new(Mode::Daily, day, daily_answer(day), Level::Easy.difficulty()).with_tries(8);
+        // Whatever today's word is, one of these is not it.
+        let wrong = if game::text(&old.answer) == "SLATE" { "COUNT" } else { "SLATE" };
+        old.add_guess(game::word(wrong).unwrap());
+        app.stats.save_daily(&old);
+        app.on_key(ctrl('d'));
+        assert_eq!((app.level, app.game.tries, app.game.guesses.len()), (Level::Easy, 8, 1));
+        // A saved level that does not fit the saved game's rules is not believed.
+        app.stats.set("daily_level", format!("{day},3"));
+        app.on_key(ctrl('n'));
+        app.on_key(ctrl('d'));
+        assert_eq!(app.level, Level::Easy);
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -1024,7 +1100,7 @@ mod tests {
 
     #[test]
     fn sounds_follow_what_happens_in_the_game() {
-        let (mut app, dir) = app("sound");
+        let (mut app, dir) = app_at("sound", Some(Level::Normal));
         // Off, as in every other test: nothing is asked of it.
         type_word(&mut app, "qqqqq");
         assert!(app.sound.log.is_empty());

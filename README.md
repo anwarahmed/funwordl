@@ -8,7 +8,8 @@ learned; ask for a hint when you are stuck.
 
 - **Hints that teach.** The first hint is what the word means. After that, a letter
   at a time.
-- **An Easy level.** Eight guesses, and a word that is not solved costs nothing. It
+- **An Easy level.** Any five letters are a guess, so letters can be tried out
+  without having to think of a word, and a word that is not solved costs nothing. It
   is one key away from Normal, where the game starts; two harder levels are beyond.
 - **Sounds.** A note for every tile as a guess is turned over, higher the closer it
   is, and a little tune for a solved word. One key switches them off.
@@ -111,7 +112,7 @@ starts as usual.
 
 ## Play
 
-Type a five-letter word and press Enter. Each tile then tells you how close you were:
+Type a five-letter word and press Enter. You have six guesses. Each tile then tells you how close you were:
 
 | Tile   | Meaning                                 |
 | ------ | --------------------------------------- |
@@ -144,10 +145,10 @@ The on-screen keyboard keeps track of what you know about each letter.
 `Ctrl-X` goes round four levels. The game starts on Normal and remembers the one you
 choose.
 
-- **Easy** - eight guesses, and hints. A word you do not solve is not counted against
-  you and does not end a run of solved words.
-- **Normal** (where the game starts) - six guesses, and hints. Guesses must be real
-  words.
+- **Easy** - a guess can be any five letters; it does not have to be a word. Hints.
+  A word you do not solve is not counted against you and does not end a run of
+  solved words.
+- **Normal** (where the game starts) - a guess must be a real word. Hints.
 - **Hard** - no hints, and green letters must stay where they are and yellow letters
   must be used again.
 - **Ultra Hard** - also: a yellow letter must move to another spot, and a gray letter
@@ -155,7 +156,8 @@ choose.
 
 A guess that breaks a rule is refused with the reason. A game that is under way can be
 made easier at any time; a harder level starts with the next word, unless nothing has
-been guessed or hinted yet.
+been guessed or hinted yet. (Guesses made on Easy need not have been words, so a game
+begun there stays there.)
 
 ### Hints
 
@@ -241,9 +243,8 @@ color-blind players.
 ### Terminal size
 
 The game redraws itself when the window is resized and picks the largest board that
-fits. The smallest usable size is 39 columns by 12 rows, and 39 by 14 on Easy, whose
-board is two rows taller (a wide terminal can be shorter
-still). Truecolor is used when the terminal announces it (`COLORTERM`), 256 colors
+fits. The smallest usable size is 39 columns by 12 rows (a wide terminal can be
+shorter still). Truecolor is used when the terminal announces it (`COLORTERM`), 256 colors
 otherwise.
 
 While the game runs it captures the mouse, so selecting text in the terminal needs
@@ -263,8 +264,8 @@ funwordl --help | --version | --licenses
                             meadow, sage, lavender, orchid, grape, sky, paper, daylight
                             dark: midnight, neon, contrast, ocean, ember
                             or terminal, which follows your terminal's colors
-      --easy                eight guesses, and hints with Tab
-      --normal              six guesses, and hints with Tab (default)
+      --easy                any five letters are a guess; hints with Tab
+      --normal              a guess must be a real word; hints with Tab (default)
       --hard                no hints; green letters stay fixed, yellow letters must
                             be reused
       --ultra               ultra hard: also, yellow letters must move to another

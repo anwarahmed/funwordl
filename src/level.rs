@@ -1,19 +1,18 @@
-//! The four levels. Easy has more guesses; Easy and Normal have hints. Normal, Hard
-//! and Ultra Hard hold a guess to the clues as wordl's three difficulties do, and the
-//! game starts on Normal.
+//! The four levels. Easy takes any five letters as a guess, where the others want a
+//! real word; Easy and Normal have hints. Normal, Hard and Ultra Hard hold a guess to
+//! the clues as wordl's three difficulties do, and the game starts on Normal.
 
-use crate::game::{Difficulty, Game, TRIES};
+use crate::game::{Difficulty, Game};
 
-/// How many guesses an Easy game allows.
-pub const EASY_TRIES: usize = 8;
 /// The most hints one word gives: its meaning, then three of its letters.
 pub const MAX_HINTS: usize = 4;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub enum Level {
-    /// Eight guesses, hints on request, and a word that is not solved costs nothing.
+    /// Any five letters are a guess, there are hints, and a word that is not solved
+    /// costs nothing.
     Easy,
-    /// Six guesses and hints; any dictionary word is a valid guess.
+    /// A guess must be a word in the dictionary; hints.
     Normal,
     /// Green letters stay where they are, yellow letters are reused.
     Hard,
@@ -43,8 +42,9 @@ impl Level {
         ["Easy", "Normal", "Hard", "Ultra Hard"][self.index()]
     }
 
-    pub fn tries(self) -> usize {
-        if self == Self::Easy { EASY_TRIES } else { TRIES }
+    /// Whether a guess may be any five letters. Everywhere else it must be a word.
+    pub fn any_letters(self) -> bool {
+        self == Self::Easy
     }
 
     /// Whether hints can be asked for. The two hard levels are played without.
@@ -61,21 +61,16 @@ impl Level {
         }
     }
 
-    /// The level a game is being played at. Nothing more is stored than what the rules
-    /// need: an Easy game is one that allows more than the usual six guesses.
+    /// The level of a game that says nothing more than its rules: a daily puzzle saved
+    /// without one. Up to 0.1.2 an Easy game was one with eight guesses, and such a
+    /// game, found in a saved file, is still Easy and keeps its eight.
     pub fn of(game: &Game) -> Self {
         match game.difficulty {
-            Difficulty::Normal if game.tries > TRIES => Self::Easy,
+            Difficulty::Normal if game.tries > crate::game::TRIES => Self::Easy,
             Difficulty::Normal => Self::Normal,
             Difficulty::Hard => Self::Hard,
             Difficulty::Ultra => Self::Ultra,
         }
-    }
-
-    /// Sets a game to this level.
-    pub fn apply(self, game: &mut Game) {
-        game.difficulty = self.difficulty();
-        game.tries = self.tries();
     }
 }
 
@@ -91,17 +86,26 @@ mod tests {
     use crate::game::{Mode, word};
 
     #[test]
-    fn levels_cycle_and_describe_a_game() {
+    fn levels_cycle_and_say_what_they_allow() {
         assert_eq!(Level::Easy.next(), Level::Normal);
         assert_eq!(Level::Ultra.next(), Level::Easy);
-        assert_eq!((Level::Easy.tries(), Level::Normal.tries(), Level::Ultra.tries()), (8, 6, 6));
+        assert_eq!(Level::ALL.map(Level::any_letters), [true, false, false, false]);
         assert_eq!(Level::ALL.map(Level::hints), [true, true, false, false]);
         for level in Level::ALL {
-            let mut game = Game::new(Mode::Practice, 0, word("CRANE").unwrap(), Difficulty::Normal);
-            level.apply(&mut game);
-            assert_eq!(Level::of(&game), level);
             assert_eq!(Level::from_index(level.index()), level);
         }
+        // Easy and Normal hold a guess to the same clues: none.
+        assert_eq!(Level::Easy.difficulty(), Level::Normal.difficulty());
+    }
+
+    #[test]
+    fn a_game_saved_without_its_level_is_read_from_its_rules() {
+        let game = |difficulty, tries| Game::new(Mode::Daily, 0, word("CRANE").unwrap(), difficulty).with_tries(tries);
+        assert_eq!(Level::of(&game(Difficulty::Normal, 6)), Level::Normal);
+        assert_eq!(Level::of(&game(Difficulty::Hard, 6)), Level::Hard);
+        assert_eq!(Level::of(&game(Difficulty::Ultra, 6)), Level::Ultra);
+        // An Easy game from before 0.1.3.
+        assert_eq!(Level::of(&game(Difficulty::Normal, 8)), Level::Easy);
     }
 
     #[test]

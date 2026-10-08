@@ -219,7 +219,7 @@ fn info_text(app: &App) -> String {
         Mode::Daily => format!("Daily #{}", app.daily_number()),
         Mode::Practice => "Practice".to_string(),
     };
-    let level = Level::of(game);
+    let level = app.level;
     if level != Level::Easy {
         s += &format!(" · {}", level.name());
     }
@@ -505,7 +505,7 @@ fn dialog(app: &App) -> Option<Dialog> {
         Modal::Help => {
             // Twenty lines: with its frame and buttons that is all of a 24-row terminal.
             let mut lines = vec![middle("HOW TO PLAY", accent), blank()];
-            for s in ["Guess the hidden 5-letter word.", "The tiles show how close you are:"] {
+            for s in ["Guess the hidden 5-letter word in", "6 tries. The tiles show how close:"] {
                 lines.push(line(vec![(s.to_string(), text)]));
             }
             for (mark, meaning) in
@@ -529,7 +529,7 @@ fn dialog(app: &App) -> Option<Dialog> {
             }
             lines.push(blank());
             for (level, rule) in
-                [("Easy", "8 guesses, hints"), ("Normal", "6 guesses, hints"), ("Hard", "reuse green and yellow"), ("Ultra", "obey every clue")]
+                [("Easy", "any letters, hints"), ("Normal", "real words, hints"), ("Hard", "reuse green and yellow"), ("Ultra", "obey every clue")]
             {
                 lines.push(line(vec![(format!("{level:<8}"), text.bold()), (rule.to_string(), dim)]));
             }
@@ -585,7 +585,7 @@ fn dialog(app: &App) -> Option<Dialog> {
             Dialog { lines, buttons }
         }
         Modal::GiveUp => {
-            let what = match Level::of(game) {
+            let what = match app.level {
                 Level::Easy => ["The word will be shown, and kept", "in your words to look at again."],
                 _ => ["The word will be shown and the", "game counts as not solved."],
             };
@@ -818,16 +818,15 @@ mod tests {
     }
 
     #[test]
-    fn draws_an_easy_game_at_80x24() {
+    fn draws_the_game_at_80x24() {
         let (mut app, dir) = app("80x24");
         app.game.add_guess(game::word("SLATE").unwrap());
         app.game.cur = b"CR".to_vec();
         let s = screen(&mut app, 80, 24);
         assert!(s[0].contains(" F   U   N   W   O   R   D   L   Practice"), "{}", s[0]);
-        // Eight rows: a revealed guess, the one being typed, and six still empty.
-        assert!(s[2].contains("  S     L     A     T     E  "), "{}", s[2]);
-        assert!(s[4].contains("  C     R  "), "{}", s[4]);
-        assert_eq!(layout_for(&app, 80, 24).unwrap().by + 14, 16, "the eighth row");
+        // A revealed guess, then the one being typed in framed tiles.
+        assert!(s[2].contains("  S      L      A      T      E  "), "{}", s[2]);
+        assert!(s[5].contains("█ C █  █ R █  █   █"), "{}", s[5]);
         assert!(s[20].contains("Q   W   E   R   T   Y   U   I   O   P"));
         assert!(s[22].contains("⌫    Z   X   C   V   B   N   M    ↵"));
         for item in ["? Help", "Tab Hint", "^S Stars", "^X Easy", "^G Reveal", "^Q Quit"] {
@@ -837,7 +836,7 @@ mod tests {
     }
 
     #[test]
-    fn the_other_levels_have_six_rows_and_bigger_tiles() {
+    fn the_level_is_named_beside_the_title_and_in_the_footer() {
         let (mut app, dir) = app_at("six", Level::Hard);
         app.game.add_guess(game::word("SLATE").unwrap());
         app.game.cur = b"CR".to_vec();
@@ -933,11 +932,13 @@ mod tests {
     fn says_when_the_terminal_is_too_small() {
         let (mut app, dir) = app("small");
         let s = screen(&mut app, 30, 8);
-        assert!(has(&s, "funwordl needs 39x14") && has(&s, "this is 30x8"));
-        // Six rows need less.
-        Level::Normal.apply(&mut app.game);
-        assert!(has(&screen(&mut app, 30, 8), "funwordl needs 39x12"));
+        assert!(has(&s, "funwordl needs 39x12") && has(&s, "this is 30x8"));
         assert!(has(&screen(&mut app, 39, 12), "^Q"));
+        // A daily puzzle saved by 0.1.2 on Easy has eight rows, and needs two more.
+        app.game.tries = 8;
+        assert!(has(&screen(&mut app, 39, 12), "funwordl needs 39x14"));
+        assert!(has(&screen(&mut app, 39, 14), "^Q"));
+        app.game.tries = 6;
         // Nothing to draw into at all must not panic either.
         screen(&mut app, 1, 1);
         let _ = std::fs::remove_dir_all(dir);
@@ -997,13 +998,13 @@ mod tests {
         }
         (app.hints, app.hint_letters) = (4, vec![0, 2, 4]);
         for level in Level::ALL {
-            level.apply(&mut app.game);
+            app.set_level(level);
             for modal in &MODALS[1..] {
                 app.modal = *modal;
                 fits(&app, &format!("{modal:?} at {level:?}, playing"));
             }
         }
-        Level::Easy.apply(&mut app.game);
+        app.set_level(Level::Easy);
         app.game.give_up();
         app.learned.insert("crane".to_string(), "0".to_string());
         for modal in [Modal::Stats, Modal::Words] {
@@ -1023,7 +1024,7 @@ mod tests {
         app.modal = Modal::Stats;
         fits(&app, "Stats, won");
         let s = screen(&mut app, 80, 24);
-        assert!(has(&s, "YOU DID IT!") && has(&s, "★★★  Solved in 1/8") && has(&s, "SKEIN: a loose bundle of yarn or"), "{s:#?}");
+        assert!(has(&s, "YOU DID IT!") && has(&s, "★★★  Solved in 1/6") && has(&s, "SKEIN: a loose bundle of yarn or"), "{s:#?}");
         // Each number has its name beside it.
         app.stats.set("practice_wins", 6);
         app.stats.set("practice_streak", 5);
@@ -1078,9 +1079,9 @@ mod tests {
         // Back in the game the letters wait in the row being typed, until typed over.
         press(&mut app, KeyCode::Esc);
         let row = |app: &mut App| screen(app, 80, 24)[2].trim().to_string();
-        assert_eq!(row(&mut app), "C           A");
+        assert_eq!(row(&mut app), "█ C █  █   █  █ A █  █   █  █   █");
         app.game.cur = b"S".to_vec();
-        assert_eq!(row(&mut app), "S           A");
+        assert_eq!(row(&mut app), "█ S █  █   █  █ A █  █   █  █   █");
         // Once there is nothing more to give, the button goes.
         press(&mut app, KeyCode::Tab);
         press(&mut app, KeyCode::Tab);
