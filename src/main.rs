@@ -49,8 +49,8 @@ Options:
                             meadow, sage, lavender, orchid, grape, sky, paper, daylight
                             dark: midnight, neon, contrast, ocean, ember
                             or terminal, which follows your terminal's colors
-      --easy                eight guesses, and hints with Tab
-      --normal              six guesses, and hints with Tab (default)
+      --easy                any five letters are a guess; hints with Tab
+      --normal              a guess must be a real word; hints with Tab (default)
       --hard                no hints; green letters stay fixed, yellow letters must
                             be reused
       --ultra               ultra hard: also, yellow letters must move to another
