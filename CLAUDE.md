@@ -255,6 +255,17 @@ dialog lines of at most 35 characters, tests beside the code.
   flash, and cannot tell a win from a mistake. Which notes are played is Claude's
   choice, checked by machine (length, loudness, a real player accepts the files) but
   **not heard by Claude**: only a person can say whether they are pleasant.
+- **Sound shows on screen, and a click switches it** (the user asked for "the option
+  to turn sound on/off", 0.1.4). `Ctrl-A` was already there but only the help named
+  it; of the ways offered (an indicator on the info line, a button in the stars
+  dialog, a footer item) the user chose the indicator.
+- **No Ctrl-Shift keys** (the user, 0.1.4). Ctrl-Shift-T for the theme before was
+  asked for and then dropped: it must behave the same in a terminal, in tmux and in
+  herdr, on macOS and Linux, and without the kitty keyboard protocol or xterm's
+  modifyOtherKeys it is the same byte as Ctrl-T. Those protocols are answered by some
+  terminals and not others, tmux takes only modifyOtherKeys, and with tmux's default
+  `extended-keys-format` it sends `CSI 27;…~`, which crossterm cannot read, so every
+  Ctrl key would stop working. The user: "more complication than it is worth".
 - **Hints teach before they tell.** The players are children up to 13 and the user
   sees the game as a way for them to learn words, so the first hint is the meaning,
   which is the thing worth learning, and letters come only after.
@@ -350,8 +361,8 @@ a key arrives as Alt+key; never test copying against the real clipboard).
   tmux. Whether four hints and the star rule feel right is unknown.
 - Never run by a person on a real Mac; CI runs the tests on a macOS runner.
 - The Intel macOS binary is cross-built and never executed in CI.
-- With twenty-one themes, `Ctrl-T` is a long walk round, and there is no way to pick
-  one from a list in the game (`--theme NAME` does it from the command line).
+- With twenty-one themes, `Ctrl-T` is a long walk round (and only forwards; see "No
+  Ctrl-Shift keys"), and there is no way to pick one from a list in the game (`--theme NAME` does it from the command line).
 - The theme test sweep draws every theme at every size and takes about a minute in a
   debug build.
 - The sounds have not been heard by anyone but a machine (see "Sounds" above). There
