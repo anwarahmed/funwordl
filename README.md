@@ -196,7 +196,8 @@ The game makes a few sounds: a note for each tile as a guess is turned over (hig
 green, middle for yellow, low for gray), a short tune when a word is solved, and small
 ones for a hint, a refused guess and a word not solved.
 
-`Ctrl-A` switches sound off and on, and the game remembers it. `--no-sound`, or
+`Ctrl-A` switches sound off and on, and so does a click on "♪ on" or "♪ off" at the
+end of the line under the title; the game remembers it. `--no-sound`, or
 `FUNWORDL_NO_SOUND=1`, plays one game without.
 
 A terminal cannot play sounds itself, so the game hands them to the player your system

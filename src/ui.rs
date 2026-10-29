@@ -212,7 +212,12 @@ fn mark_paints(th: &Theme, mark: Mark) -> (Paint, Paint) {
     }
 }
 
-/// The line under the title: which game this is.
+/// The info line ends with this, which a click switches.
+fn sound_label(app: &App) -> &'static str {
+    if app.sound.on { "♪ on" } else { "♪ off" }
+}
+
+/// The line under the title: which game this is, and whether sound is on.
 fn info_text(app: &App) -> String {
     let game = &app.game;
     let mut s = match game.mode {
@@ -231,7 +236,7 @@ fn info_text(app: &App) -> String {
     if streak > 1 {
         s += &format!(" · {streak} in a row");
     }
-    s
+    s + " · " + sound_label(app)
 }
 
 /// The layout for the game being played: an Easy game's board has two more rows.
@@ -239,33 +244,41 @@ fn layout_for(app: &App, cols: i32, rows: i32) -> Option<Layout> {
     layout::layout(cols, rows, app.game.tries)
 }
 
-fn draw_title(c: &mut Canvas, app: &App, l: &Layout) {
-    let th = c.th;
-    let info = info_text(app);
-    let dim = on(th.dim.fg, th.bg.bg);
-    let (party, ink) = th.party();
+/// Where the title and the info line go: the title's left edge, whether it is written
+/// small, and where the info starts, if there is room for it.
+fn title_place(app: &App, l: &Layout) -> (i32, bool, Option<(i32, i32)>) {
+    let info = width(&info_text(app));
     let (tw, _) = l.title.grid(TITLE_LETTERS, 1);
-    let mut x = l.hx;
     match l.info_y {
-        Some(y) => c.center(y, l.rx, l.rw, &info, dim),
+        Some(y) => (l.hx, false, Some((l.rx + (l.rw - info) / 2, y))),
         // On one row: the title, two spaces, the info, centered together when they fit.
-        None if tw + 2 + width(&info) <= l.rw => {
-            x = l.rx + (l.rw - tw - 2 - width(&info)) / 2;
-            c.put(x + tw + 2, l.hy, &info, dim);
+        None if tw + 2 + info <= l.rw => {
+            let x = l.rx + (l.rw - tw - 2 - info) / 2;
+            (x, false, Some((x + tw + 2, l.hy)))
         }
         // Too narrow for both: the info matters more than the tiles, so the title is
         // written small, one colored letter per cell.
-        None if TITLE_LETTERS + 2 + width(&info) <= l.rw => {
-            x = l.rx + (l.rw - TITLE_LETTERS - 2 - width(&info)) / 2;
-            for (i, letter) in TITLE.chars().enumerate() {
-                c.put(x + i as i32, l.hy, &letter.to_string(), on(party[i].fg, th.bg.bg).bold());
-            }
-            return c.put(x + TITLE_LETTERS + 2, l.hy, &info, dim);
+        None if TITLE_LETTERS + 2 + info <= l.rw => {
+            let x = l.rx + (l.rw - TITLE_LETTERS - 2 - info) / 2;
+            (x, true, Some((x + TITLE_LETTERS + 2, l.hy)))
         }
-        None => {}
+        None => (l.hx, false, None),
+    }
+}
+
+fn draw_title(c: &mut Canvas, app: &App, l: &Layout) {
+    let th = c.th;
+    let (party, ink) = th.party();
+    let (x, small, info) = title_place(app, l);
+    if let Some((ix, iy)) = info {
+        c.put(ix, iy, &info_text(app), on(th.dim.fg, th.bg.bg));
     }
     for (i, letter) in TITLE.bytes().enumerate() {
-        c.block(x + i as i32 * l.title.px, l.hy, l.title.w, l.title.t, true, party[i], ink, Label::Letter(letter), 0, false);
+        if small {
+            c.put(x + i as i32, l.hy, &(letter as char).to_string(), on(party[i].fg, th.bg.bg).bold());
+        } else {
+            c.block(x + i as i32 * l.title.px, l.hy, l.title.w, l.title.t, true, party[i], ink, Label::Letter(letter), 0, false);
+        }
     }
 }
 
@@ -762,6 +775,13 @@ pub fn action_at(app: &App, x: i32, y: i32) -> Option<Action> {
     if let Some(&(.., key)) = keyboard_keys(&l).iter().find(|&&(kx, ky, w, _)| x >= kx && x < kx + w && y >= ky && y < ky + l.keys.py) {
         return Some(Action::Key(key));
     }
+    // The sound switch at the end of the info line, with a column of slack before it.
+    if let (.., Some((ix, iy))) = title_place(app, &l) {
+        let end = ix + width(&info_text(app));
+        if y == iy && x >= end - width(sound_label(app)) - 1 && x < end {
+            return Some(Action::Sound);
+        }
+    }
     let (items, labels) = footer_items(app, l.cols);
     items
         .into_iter()
@@ -852,7 +872,7 @@ mod tests {
     fn a_narrow_terminal_gets_a_small_title_beside_the_info() {
         let (mut app, dir) = app("narrow");
         let s = screen(&mut app, 39, 14);
-        assert!(s[0].contains("FUNWORDL  Practice"), "{}", s[0]);
+        assert!(s[0].contains("FUNWORDL  Practice · ♪ off"), "{}", s[0]);
         // Keys only in the footer, all nine of them.
         assert!(s[13].contains("?  Tab  ^N  ^D  ^S  ^T  ^X  ^G  ^Q"), "{}", s[13]);
         // With no room for the info either, the title is back in tiles.
@@ -1174,6 +1194,19 @@ mod tests {
         let (x, y) = find(&s, "Tab Hint");
         assert_eq!(action_at(&app, x + 5, y), Some(Action::Hint));
         assert_eq!(action_at(&app, 0, 0), None);
+        let (x, y) = find(&s, "♪ off");
+        assert_eq!(action_at(&app, x + 2, y), Some(Action::Sound));
+        assert_eq!(action_at(&app, x - 3, y), None);
+        app.sound.on = true;
+        let s = screen(&mut app, 80, 24);
+        let (x, y) = find(&s, "♪ on");
+        assert_eq!(action_at(&app, x + 3, y), Some(Action::Sound));
+        assert_eq!(action_at(&app, x + 4, y), None);
+        app.sound.on = false;
+        // At 39 columns the info sits beside a small title, and the switch still works.
+        let s = screen(&mut app, 39, 14);
+        let (x, y) = find(&s, "♪ off");
+        assert_eq!(action_at(&app, x, y), Some(Action::Sound));
 
         // With a dialog open, only its buttons can be pressed.
         app.modal = Modal::GiveUp;

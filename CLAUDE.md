@@ -131,7 +131,9 @@ Single binary crate, no async. One file per concern in `src/`:
   - **The end of a game sounds after the reveal** (`App::end_sound`, from `tick`),
     or in its place when animations are off.
   - The switch is `Ctrl-A` (`Action::Sound`), saved as `sound=0|1`; `--no-sound` and
-    `FUNWORDL_NO_SOUND` are for one run. It has no footer item: there is no room.
+    `FUNWORDL_NO_SOUND` are for one run. It has no footer item, there is no room;
+    instead the info line ends in "♪ on" or "♪ off", and a click there switches it
+    (`ui::title_place` says where the info line is, for drawing and for clicks).
 - **Hints** (`Action::Hint`, on Easy and Normal). `App::hints` counts them; the first is the
   meaning, each later one pushes a spot onto `hint_letters`, up to `MAX_HINTS`. The
   spot is the first of 0, 2, 4, 1, 3 that is neither given already nor green in a
@@ -171,7 +173,8 @@ Single binary crate, no async. One file per concern in `src/`:
 - **The footer has nine items** and must show its labels at 80 columns; they add up to
   77 with "Normal", the longest level name the footer shows. The collection and the
   sound switch have no footer item for that reason: they are `Ctrl-W` (also a button
-  in the stars dialog) and `Ctrl-A`, both in the help.
+  in the stars dialog) and `Ctrl-A` (also "♪ on/off" at the end of the info line),
+  both in the help.
 - **The help is exactly 20 lines**, which with its frame and button is all of a
   24-row terminal. Adding a line means taking one out.
 - **The result's buttons are `N New`, `C Copy`, `W Words`, `Esc`**: exactly 35
